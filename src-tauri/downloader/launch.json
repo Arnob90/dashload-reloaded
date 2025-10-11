@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "LLDB Debug (Rust)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/deps/download_integration_test-cea8bb6870203a85",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": ["rust"],
+            "env": {},
+            "stopOnEntry": false,
+            "console": "integratedTerminal"
+        }
+    ]
+}

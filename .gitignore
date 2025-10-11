@@ -23,3 +23,4 @@ dist-ssr
 *.sln
 *.sw?
 src-tauri/downloader/target
+src-tauri/downloader/tests/downloads
