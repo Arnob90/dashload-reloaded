@@ -1,20 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 import "@mantine/core/styles.css"
-import { MantineProvider,createTheme,ColorSchemeScript } from "@mantine/core"
-import  { DownloadHeader } from "./components/header/downloaditemheader"
+import { MantineProvider, createTheme, ColorSchemeScript } from "@mantine/core"
+import { DownloadHeader } from "./components/header/downloaditemheader"
 import { AddDownloadDialog } from "./components/adddownload/adddownload"
+import { useDownloadStatuses } from "./code/getStatus";
 const theme = createTheme({
 })
 
-
 function App() {
     const [downloadDialogOpen, changeOpenState] = useState(false)
+    const { data, isLoading, error } = useDownloadStatuses()
+    useEffect(() => {
+        const test = async () => {
+            console.log(data)
+        }
+        const interval = setInterval(test, 300);
+        return () => {
+            clearInterval(interval)
+        }
+    }
+    )
     return (
         <>
             <ColorSchemeScript forceColorScheme="dark" />
             <MantineProvider theme={theme} forceColorScheme="dark">
-                <DownloadHeader onClickAddDownload={()=>changeOpenState(true)} />
+                <DownloadHeader onClickAddDownload={() => changeOpenState(true)} />
                 <AddDownloadDialog open={downloadDialogOpen} onOpenStateChangeRequested={changeOpenState} />
             </MantineProvider>
         </>

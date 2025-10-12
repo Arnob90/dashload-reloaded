@@ -2,6 +2,7 @@
 pub mod download_manager;
 pub mod filename_getter;
 pub mod idownloaditem;
+mod lazy;
 pub mod length_getter;
 pub mod message_pass;
 pub mod misc;

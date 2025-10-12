@@ -1,11 +1,15 @@
 use async_trait::async_trait;
+use futures::future::Lazy;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::OnceCell;
 
+use crate::filename_getter::get_filename;
 use crate::idownloaditem::IDownloadItem;
+use crate::lazy::AsyncLazy;
 use crate::length_getter::LengthGettingErrors;
 use crate::segment::{self, DownloadRunError};
-use crate::{length_getter, statuses};
-use std::path;
+use crate::{filename_getter, length_getter, statuses};
+use std::path::{self, Path};
 use std::time::Duration;
 use tokio::select;
 pub struct NormalDownloadItem {
@@ -15,7 +19,8 @@ pub struct NormalDownloadItem {
     pub status_reciever: tokio::sync::watch::Receiver<statuses::DownloadStatus>,
     pub client: reqwest::Client,
     pub filesize: u64,
-    pub update_interval: u64
+    pub update_interval: u64,
+    pub filename: AsyncLazy<String>,
 }
 
 impl NormalDownloadItem {
@@ -23,25 +28,44 @@ impl NormalDownloadItem {
         url: String,
         filepath: path::PathBuf,
         client: reqwest::Client,
-        update_interval:u64
+        update_interval: u64,
     ) -> Result<NormalDownloadItem, LengthGettingErrors> {
+        let url_copy = url.clone();
         let length = length_getter::get_length(client.clone(), &url).await?;
         let client_clone = client.clone();
         let (sender, reciever) = tokio::sync::watch::channel(statuses::DownloadStatus::Pending);
+        //I wish we could take a closure directly.
+        //BUT THAT REQUIRES FN ONCE.
+        //We need the factory pattern
+        let filepath_clone = filepath.clone();
+        let filename = AsyncLazy::new(move || {
+            let client = client_clone.clone();
+            let url = url_copy.clone();
+            let filepath = filepath_clone.clone();
+            async move {
+                if filepath.is_file() {
+                    return filepath.file_name().unwrap().to_str().unwrap().to_string();
+                }
+                get_filename(client, &url)
+                    .await
+                    .unwrap_or("untitled".to_string())
+            }
+        });
         Ok(Self {
             url,
             filepath,
             status_sender: sender.into(),
             status_reciever: reciever,
-            client: client_clone,
+            client,
             filesize: length,
-            update_interval
+            update_interval,
+            filename,
         })
     }
 }
 
 impl NormalDownloadItem {
-    async fn start_helper(&self) -> Result<(),DownloadRunError> {
+    async fn start_helper(&self) -> Result<(), DownloadRunError> {
         let required_sender = &self.status_sender;
         if *required_sender.borrow() != statuses::DownloadStatus::Pending {
             return Err(DownloadRunError::AlreadyRunning);
@@ -55,10 +79,18 @@ impl NormalDownloadItem {
         if !res.status().is_success() {
             return Err(DownloadRunError::ServerNotAvailable);
         }
+        let mut filepath = self.filepath.as_path().to_path_buf();
+        if filepath.is_dir() {
+            let filename = get_filename(self.client.clone(), &self.url)
+                .await
+                .unwrap_or("untitled".to_string());
+            let filename_path = Path::new(&filename);
+            filepath = filepath.join(&filename_path);
+        }
         let mut file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .open(&self.filepath)
+            .create_new(true)
+            .write(true)
+            .open(filepath)
             .await?;
         let mut downloaded_so_far: u64 = 0;
         let mut interval = tokio::time::interval(Duration::from_millis(self.update_interval));
@@ -89,13 +121,27 @@ impl IDownloadItem for NormalDownloadItem {
     async fn start(&self) -> Result<(), DownloadRunError> {
         let err_maybe = self.start_helper().await;
         if err_maybe.is_err() {
-            let _ = self.status_sender.send(statuses::DownloadStatus::Failed(err_maybe.clone().unwrap_err()));
+            let _ = self.status_sender.send(statuses::DownloadStatus::Failed(
+                err_maybe.clone().unwrap_err(),
+            ));
         }
         return err_maybe;
     }
-    fn get_status(
-        &self,
-    ) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError> {
+    fn get_status(&self) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError> {
         Ok(self.status_reciever.borrow().clone())
+    }
+    async fn filename(&self) -> String {
+        self.filename.get().await
+    }
+    async fn filepath(&self) -> String {
+        if self.filepath.is_dir() {
+            return self
+                .filepath
+                .join(self.filename.get().await)
+                .to_str()
+                .unwrap()
+                .to_string();
+        }
+        self.filepath.to_str().unwrap().to_string()
     }
 }

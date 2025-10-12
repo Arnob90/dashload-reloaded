@@ -28,6 +28,6 @@ async-trait = "0.1.89"
 dirs-next = "2.0.0"
 tauri-plugin-dialog = "2"
 
-[target.x86_64-unknown-linux-gnu]
+[target.'cfg(target_os = "linux")']
 linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+rustflags = ["-C", "link-arg=-fuse-ld=/bin/mold"]

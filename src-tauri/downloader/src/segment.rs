@@ -32,6 +32,7 @@ pub struct SegmentStatusGetter {
 }
 
 #[derive(Debug, Error,Clone, PartialEq, Serialize)]
+#[serde(tag="kind", content="payload")]
 pub enum DownloadRunError {
     #[error("Request failed! Reason: {0}")]
     RequestError(String),
@@ -70,8 +71,8 @@ impl From<std::io::Error> for DownloadRunError {
     }
 }
 
-
-#[derive(Debug, Error)]
+#[derive(Debug, Error,Serialize)]
+#[serde(tag="kind", content="payload")]
 pub enum DownloadStatusCheckError {
     #[error("Download is dropped and cannot be checked")]
     DroppedDownloadError,
@@ -121,7 +122,6 @@ impl Segment {
         }
         println!("I am here 1");
         println!("Current filepath {}", &self.data.filepath);
-        //TODO: Fix error
         let mut file = tokio::fs::OpenOptions::new()
             .create_new(true)
             .write(true)

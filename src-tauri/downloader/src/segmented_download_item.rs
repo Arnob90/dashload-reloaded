@@ -1,14 +1,22 @@
+use crate::lazy::AsyncLazy;
+use crate::misc::FutureVec;
 use crate::{
-    filename_getter, idownloaditem::IDownloadItem, length_getter, segment::{self, DownloadRunError, DownloadStatusCheckError, Segment, SegmentData}, segmented_verifier, segmenter::{self, segment_into_portions}, statuses::{self, DownloadStatus}
+    filename_getter,
+    idownloaditem::IDownloadItem,
+    length_getter,
+    segment::{self, DownloadRunError, DownloadStatusCheckError, Segment, SegmentData},
+    segmented_verifier,
+    segmenter::{self, segment_into_portions},
+    statuses::{self, DownloadStatus},
 };
 use async_trait::async_trait;
+use filename_getter::get_filename;
 use futures::future::join_all;
 use getset;
-use crate::misc::FutureVec;
 use getset::{CloneGetters, Getters};
 use reqwest::{self};
 use serde::{Deserialize, Serialize};
-use std::{path};
+use std::path;
 use thiserror::Error;
 use tokio::{fs, io::AsyncWriteExt};
 #[derive(Serialize, Deserialize)]
@@ -35,7 +43,8 @@ pub struct SegmentedDownloadItem {
     #[getset(get_copy = "pub")]
     filesize: u64,
     #[getset(get_copy = "pub")]
-    polling_rate_ms: u64
+    polling_rate_ms: u64,
+    filename: crate::lazy::AsyncLazy<String>,
 }
 
 #[derive(Error, Debug)]
@@ -69,7 +78,7 @@ impl SegmentedDownloadItem {
         url: &str,
         filepath_str: &str,
         number_of_segments: u64,
-        polling_rate_ms: u64
+        polling_rate_ms: u64,
     ) -> Result<SegmentedDownloadItem, DownloadItemCreationError> {
         let filepath_to_download = path::Path::new(filepath_str);
         let full_path = if filepath_to_download.is_dir() {
@@ -98,21 +107,39 @@ impl SegmentedDownloadItem {
                 filepath: segment_path.clone(),
             };
             let (required_segment, segment_status_getter) =
-                Segment::new(client.clone(), segment_data,polling_rate_ms).await?;
+                Segment::new(client.clone(), segment_data, polling_rate_ms).await?;
             required_segments.push(required_segment);
             required_segment_getters.push(segment_status_getter);
         }
-        let (status_sender, status_reciever) = tokio::sync::watch::channel(statuses::DownloadStatus::Pending);
+        let (status_sender, status_reciever) =
+            tokio::sync::watch::channel(statuses::DownloadStatus::Pending);
+        let filepath_clone = full_path.clone();
+        let url_clone = url.clone().to_string();
+        let client_clone = client.clone();
+        let filename = AsyncLazy::new(move || {
+            let client = client_clone.clone();
+            let url = url_clone.to_string();
+            let filepath = filepath_clone.clone();
+            async move {
+                if filepath.is_file() {
+                    return filepath.file_name().unwrap().to_str().unwrap().to_string();
+                }
+                get_filename(client, &url)
+                    .await
+                    .unwrap_or("untitled".to_string())
+            }
+        });
         let required_segment = Self {
             segments_to_run: required_segments,
             status_getters: required_segment_getters,
             client,
             status_sender: status_sender.into(),
-            status_reciever: status_reciever,
+            status_reciever,
             url: url.to_string(),
             filepath: full_path,
             filesize: length,
-            polling_rate_ms
+            polling_rate_ms,
+            filename,
         };
         required_segment.serialize_data().await?;
         Ok(required_segment)
@@ -136,17 +163,25 @@ impl SegmentedDownloadItem {
         let filename = self.filepath.file_name().unwrap();
         let to_serialize_to = format!("{}.json", filename.to_str().unwrap());
         let serialized = serde_json::to_string_pretty(&to_serialize)?;
-        fs::write(path::Path::join(&self.filepath.parent().unwrap(), to_serialize_to), serialized).await?;
+        fs::write(
+            path::Path::join(&self.filepath.parent().unwrap(), to_serialize_to),
+            serialized,
+        )
+        .await?;
         Ok(())
     }
 }
 
-
 impl SegmentedDownloadItem {
     async fn start_helper(&self) -> Result<(), DownloadRunError> {
         let mut status_reviever_borrow_maybe_err = self.status_reciever.borrow().clone();
-        if let DownloadStatus::Failed(current_err)=status_reviever_borrow_maybe_err {
-            if current_err==DownloadRunError::LengthlessServerError||current_err==DownloadRunError::AlreadyRunning||current_err==DownloadRunError::IllBehavedServer||current_err==DownloadRunError::RangeError||current_err==DownloadRunError::ServerNotRangable {
+        if let DownloadStatus::Failed(current_err) = status_reviever_borrow_maybe_err {
+            if current_err == DownloadRunError::LengthlessServerError
+                || current_err == DownloadRunError::AlreadyRunning
+                || current_err == DownloadRunError::IllBehavedServer
+                || current_err == DownloadRunError::RangeError
+                || current_err == DownloadRunError::ServerNotRangable
+            {
                 return Err(current_err);
             }
             self.status_sender.send(statuses::DownloadStatus::Pending);
@@ -173,8 +208,8 @@ impl SegmentedDownloadItem {
         }
         //This must've succeeded so far
         let mut final_file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
+            .create_new(true)
+            .write(true)
             .open(&self.filepath)
             .await?;
         for segment in &self.segments_to_run {
@@ -193,25 +228,30 @@ impl IDownloadItem for SegmentedDownloadItem {
         let err_maybe = self.start_helper().await;
         if err_maybe.is_err() {
             let err = err_maybe.unwrap_err();
-            self.status_sender.send(statuses::DownloadStatus::Failed(err));
+            self.status_sender
+                .send(statuses::DownloadStatus::Failed(err));
         }
         return Ok(());
     }
-    fn get_status(
-        &self,
-    ) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError> {
+    fn get_status(&self) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError> {
         let current_status_maybe = self.status_reciever.borrow();
         let current_status_maybe_clone = current_status_maybe.clone();
-        if let statuses::DownloadStatus::Failed(current_status_err)=current_status_maybe_clone {
-            return Err(segment::DownloadStatusCheckError::DownloadRunError(current_status_err));
+        if let statuses::DownloadStatus::Failed(current_status_err) = current_status_maybe_clone {
+            return Err(segment::DownloadStatusCheckError::DownloadRunError(
+                current_status_err,
+            ));
         }
         let current_status = current_status_maybe_clone;
-        if let DownloadStatus::Running { total,downloaded:_ } = current_status
+        if let DownloadStatus::Running {
+            total,
+            downloaded: _,
+        } = current_status
         {
-            let segment_statuses_results:Vec<Result<DownloadStatus,DownloadStatusCheckError>> = self
-                .status_getters
-                .iter()
-                .map(|getter| getter.get_status()).collect();
+            let segment_statuses_results: Vec<Result<DownloadStatus, DownloadStatusCheckError>> =
+                self.status_getters
+                    .iter()
+                    .map(|getter| getter.get_status())
+                    .collect();
             let mut segment_statuses: Vec<DownloadStatus> = vec![];
             for result in segment_statuses_results {
                 segment_statuses.push(result?);
@@ -234,5 +274,19 @@ impl IDownloadItem for SegmentedDownloadItem {
             });
         }
         Ok(current_status.clone())
+    }
+    async fn filename(&self) -> String {
+        self.filename.get().await
+    }
+    async fn filepath(&self) -> String {
+        if self.filepath.is_dir() {
+            return self
+                .filepath
+                .join(self.filename.get().await)
+                .to_str()
+                .unwrap()
+                .to_string();
+        }
+        self.filepath.to_str().unwrap().to_string()
     }
 }
