@@ -1,12 +1,13 @@
+use downloader::download_manager::SegmentedDownloadAddErrors;
+use downloader::idownloaditem::IDownloadData;
 use downloader::segment::DownloadStatusCheckError;
-use downloader::{statuses};
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-use downloader::{download_manager::DownloadManager, length_getter::LengthGettingErrors};
+use downloader::download_manager::DownloadManager;
+use std::collections::HashMap;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
-use std::collections::HashMap;
 struct DownloadManagerContainer {
     download_manager: Mutex<DownloadManager>,
 }
@@ -30,10 +31,28 @@ async fn start_download_normal(
     state: State<'_, DownloadManagerContainer>,
     given_url: &str,
     filepath: &str,
-) -> Result<(), LengthGettingErrors> {
+) -> Result<(), ()> {
     let mut manager = state.download_manager.lock().await;
     manager
         .add_download_normal(given_url.to_string(), filepath.to_string())
+        .await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn start_download_segmented(
+    state: State<'_, DownloadManagerContainer>,
+    given_url: &str,
+    filepath: &str,
+    number_of_segments: u64,
+) -> Result<(), SegmentedDownloadAddErrors> {
+    let mut manager = state.download_manager.lock().await;
+    manager
+        .add_download_segmented(
+            given_url.to_string(),
+            filepath.to_string(),
+            number_of_segments,
+        )
         .await?;
     Ok(())
 }
@@ -52,9 +71,11 @@ async fn open_file(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-async fn get_status(state: State<'_,DownloadManagerContainer>) -> Result<HashMap<String,statuses::DownloadStatus>,DownloadStatusCheckError> {
+async fn get_status(
+    state: State<'_, DownloadManagerContainer>,
+) -> Result<HashMap<String, IDownloadData>, DownloadStatusCheckError> {
     let manager = state.download_manager.lock().await;
-    let status = manager.get_all_status()?;
+    let status = manager.get_all_items().await?;
     Ok(status)
 }
 
@@ -71,7 +92,8 @@ pub fn run() {
             greet,
             start_download_normal,
             open_file,
-            get_status
+            get_status,
+            start_download_segmented
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,10 +1,11 @@
+use serde::Serialize;
 use thiserror::Error;
 pub struct SegmentData {
     pub start: u64,
     pub end: u64,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Serialize)]
 pub enum MakingSegmentError {
     #[error(
         "Cannot segment when the length is less than number of segments. \nLength: {0}\nNumber_of_segments: {1}"
@@ -41,6 +42,7 @@ pub fn segment_into_portions(
     Ok(segments)
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]

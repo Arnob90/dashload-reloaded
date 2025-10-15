@@ -1,11 +1,12 @@
 use reqwest::{self, header::HeaderMap};
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::length_getter;
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Serialize)]
 pub enum SegmentVerificationError {
     #[error("Request failed!")]
-    RequestError(#[from] reqwest::Error),
+    RequestError(String),
     #[error("The server does not have a concept of filesize")]
     LengthGettingError(#[from] length_getter::LengthGettingErrors),
     #[error("Given range is out of range")]
@@ -19,11 +20,16 @@ pub enum SegmentVerificationError {
     #[error("Server error. Error code: {0}")]
     ServerFailure(u16),
 }
+impl From<reqwest::Error> for SegmentVerificationError {
+    fn from(err: reqwest::Error) -> Self {
+        SegmentVerificationError::RequestError(err.to_string())
+    }
+}
 
 pub async fn verify_segmented(
     client: reqwest::Client,
     url: &str,
-    begin: u64,
+    _begin: u64,
     end: u64,
 ) -> Result<(), SegmentVerificationError> {
     // --- Metadata Check with HEAD ---

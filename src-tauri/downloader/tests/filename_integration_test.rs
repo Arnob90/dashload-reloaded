@@ -3,7 +3,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 // Import the function you want to test from your library crate
 use downloader::filename_getter::get_filename;
-use log::{Level, debug, error, info, log_enabled};
+use log::info;
 
 #[tokio::test]
 #[test_log::test]

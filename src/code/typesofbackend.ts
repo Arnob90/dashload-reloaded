@@ -79,8 +79,11 @@ export const DownloadStatusSchema = z.discriminatedUnion("kind", [
     z.object({
         kind: z.literal("Running"),
         payload: z.object({
-            total: z.number(),
-            downloaded: z.number()
+            total: z.number().nullable(),
+            downloaded: z.number(),
+            download_speed: z.number(),
+            downloaded_portion: z.number().nullable(),
+            eta_secs: z.number().nullable()
         })
     }),
     z.object({ kind: z.literal("Completed") }),
@@ -89,7 +92,14 @@ export const DownloadStatusSchema = z.discriminatedUnion("kind", [
         payload: DownloadRunErrorSchema
     })
 ])
+export const IDownloadDataSchema = z.object({
+    filepath: z.string(),
+    filename: z.string(),
+    url: z.string(),
+    status: DownloadStatusSchema
+})
+export type IDownloadData = z.infer<typeof IDownloadDataSchema>
 export type DownloadStatus = z.infer<typeof DownloadStatusSchema>
 
-export const GetStatusFullResultSchema = z.record(z.string(), DownloadStatusSchema)
+export const GetStatusFullResultSchema = z.record(z.string(), IDownloadDataSchema)
 export type GetStatusFullResult = z.infer<typeof GetStatusFullResultSchema>

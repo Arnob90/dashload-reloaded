@@ -1,7 +1,7 @@
 use serde::Serialize;
 use thiserror::Error;
-#[derive(Error, Debug,Serialize)]
-#[serde(tag="kind", content="payload")]
+#[derive(Error, Debug, Serialize)]
+#[serde(tag = "kind", content = "payload")]
 pub enum LengthGettingErrors {
     #[error("Request failed!")]
     RequestError(String),
@@ -16,8 +16,9 @@ impl From<reqwest::Error> for LengthGettingErrors {
     }
 }
 
-pub async fn get_length(client: reqwest::Client, url: &str) -> Result<u64, LengthGettingErrors> {
-    let response = client.get(url).send().await?;
+pub async fn get_length_from_response(
+    response: reqwest::Response,
+) -> Result<u64, LengthGettingErrors> {
     let length_str = response
         .headers()
         .get("Content-Length")
@@ -29,4 +30,20 @@ pub async fn get_length(client: reqwest::Client, url: &str) -> Result<u64, Lengt
         .parse()
         .map_err(|_| LengthGettingErrors::IllBehavedServer)?;
     Ok(length_num)
+}
+
+pub async fn get_length(client: reqwest::Client, url: &str) -> Result<u64, LengthGettingErrors> {
+    //First try head
+    //If only we could map results async
+    let response = client.head(url).send().await;
+    if response.is_err() {
+        let try_get = client.get(url).send().await?;
+        return get_length_from_response(try_get).await;
+    }
+    let length = get_length_from_response(response.unwrap()).await;
+    if let Err(LengthGettingErrors::LengthlessServerError) = length {
+        let try_get = client.get(url).send().await?;
+        return get_length_from_response(try_get).await;
+    }
+    length
 }

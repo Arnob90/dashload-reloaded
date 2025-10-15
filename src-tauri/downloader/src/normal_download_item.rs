@@ -1,14 +1,11 @@
 use async_trait::async_trait;
-use futures::future::Lazy;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::OnceCell;
 
 use crate::filename_getter::get_filename;
 use crate::idownloaditem::IDownloadItem;
 use crate::lazy::AsyncLazy;
-use crate::length_getter::LengthGettingErrors;
 use crate::segment::{self, DownloadRunError};
-use crate::{filename_getter, length_getter, statuses};
+use crate::{length_getter, statuses};
 use std::path::{self, Path};
 use std::time::Duration;
 use tokio::select;
@@ -18,7 +15,7 @@ pub struct NormalDownloadItem {
     status_sender: tokio::sync::watch::Sender<statuses::DownloadStatus>,
     pub status_reciever: tokio::sync::watch::Receiver<statuses::DownloadStatus>,
     pub client: reqwest::Client,
-    pub filesize: u64,
+    pub filesize: Option<u64>,
     pub update_interval: u64,
     pub filename: AsyncLazy<String>,
 }
@@ -29,9 +26,9 @@ impl NormalDownloadItem {
         filepath: path::PathBuf,
         client: reqwest::Client,
         update_interval: u64,
-    ) -> Result<NormalDownloadItem, LengthGettingErrors> {
+    ) -> NormalDownloadItem {
         let url_copy = url.clone();
-        let length = length_getter::get_length(client.clone(), &url).await?;
+        let length = length_getter::get_length(client.clone(), &url).await.ok();
         let client_clone = client.clone();
         let (sender, reciever) = tokio::sync::watch::channel(statuses::DownloadStatus::Pending);
         //I wish we could take a closure directly.
@@ -51,16 +48,16 @@ impl NormalDownloadItem {
                     .unwrap_or("untitled".to_string())
             }
         });
-        Ok(Self {
+        Self {
             url,
             filepath,
-            status_sender: sender.into(),
+            status_sender: sender,
             status_reciever: reciever,
             client,
             filesize: length,
             update_interval,
             filename,
-        })
+        }
     }
 }
 
@@ -85,10 +82,11 @@ impl NormalDownloadItem {
                 .await
                 .unwrap_or("untitled".to_string());
             let filename_path = Path::new(&filename);
-            filepath = filepath.join(&filename_path);
+            filepath = filepath.join(filename_path);
         }
         let mut file = tokio::fs::OpenOptions::new()
-            .create_new(true)
+            .create(true)
+            .truncate(true)
             .write(true)
             .open(filepath)
             .await?;
@@ -143,5 +141,11 @@ impl IDownloadItem for NormalDownloadItem {
                 .to_string();
         }
         self.filepath.to_str().unwrap().to_string()
+    }
+    fn get_url(&self) -> String {
+        self.url.clone()
+    }
+    fn get_update_interval_ms(&self) -> u64 {
+        self.update_interval
     }
 }

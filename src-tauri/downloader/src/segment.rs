@@ -1,8 +1,8 @@
 use crate::segmented_verifier::{SegmentVerificationError, verify_segmented};
 use crate::statuses::DownloadStatus;
-use reqwest::{self, Client, Request};
+use reqwest::{self, Client};
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
@@ -31,8 +31,8 @@ pub struct SegmentStatusGetter {
     pub reciever: watch::Receiver<DownloadStatus>,
 }
 
-#[derive(Debug, Error,Clone, PartialEq, Serialize)]
-#[serde(tag="kind", content="payload")]
+#[derive(Debug, Error, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "payload")]
 pub enum DownloadRunError {
     #[error("Request failed! Reason: {0}")]
     RequestError(String),
@@ -67,12 +67,11 @@ impl From<reqwest::Error> for DownloadRunError {
 impl From<std::io::Error> for DownloadRunError {
     fn from(value: std::io::Error) -> Self {
         Self::FileWriteError(value.to_string())
-
     }
 }
 
-#[derive(Debug, Error,Serialize)]
-#[serde(tag="kind", content="payload")]
+#[derive(Debug, Error, Serialize, Clone)]
+#[serde(tag = "kind", content = "payload")]
 pub enum DownloadStatusCheckError {
     #[error("Download is dropped and cannot be checked")]
     DroppedDownloadError,
@@ -84,7 +83,7 @@ impl Segment {
     pub async fn new(
         client: reqwest::Client,
         given_data: SegmentData,
-        polling_rate: u64
+        polling_rate: u64,
     ) -> Result<(Segment, SegmentStatusGetter), SegmentVerificationError> {
         let client_to_verify = client.clone();
         verify_segmented(
@@ -99,7 +98,7 @@ impl Segment {
             data: given_data,
             sender,
             client,
-            polling_rate
+            polling_rate,
         };
         Ok((required_segment, SegmentStatusGetter { reciever }))
     }
@@ -108,14 +107,10 @@ impl Segment {
     }
     pub async fn start(&self) -> Result<(), DownloadRunError> {
         let _ = self.sender.send(DownloadStatus::Running {
-            total: self.data.end - self.data.start + 1,
+            total: Some(self.data.end - self.data.start + 1),
             downloaded: 0,
         });
-        let mut res = self
-            .client
-            .get(&self.data.url)
-            .send()
-            .await?;
+        let mut res = self.client.get(&self.data.url).send().await?;
         println!("I am here 0");
         if res.status() != reqwest::StatusCode::OK {
             return Err(DownloadRunError::ServerNotAvailable);
@@ -123,7 +118,8 @@ impl Segment {
         println!("I am here 1");
         println!("Current filepath {}", &self.data.filepath);
         let mut file = tokio::fs::OpenOptions::new()
-            .create_new(true)
+            .create(true)
+            .truncate(true)
             .write(true)
             .open(&self.data.filepath)
             .await?;
@@ -146,7 +142,7 @@ impl Segment {
                         .map_err(|_| DownloadRunError::FileOpenError)?;
                 },
                 _ = polling_interval.tick() => {
-                    let _ = self.sender.send(DownloadStatus::Running { total: self.length(), downloaded: downloaded });
+                    let _ = self.sender.send(DownloadStatus::Running { total: Some(self.length()), downloaded });
                 }
             }
         }

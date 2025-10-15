@@ -21,9 +21,9 @@ use thiserror::Error;
 use tokio::{fs, io::AsyncWriteExt};
 #[derive(Serialize, Deserialize)]
 pub struct DownloadData {
-    url: String,
-    filepath: String,
-    segments: Option<Vec<SegmentData>>,
+    pub url: String,
+    pub filepath: String,
+    pub segments: Option<Vec<SegmentData>>,
 }
 
 #[derive(Getters, CloneGetters)]
@@ -47,20 +47,31 @@ pub struct SegmentedDownloadItem {
     filename: crate::lazy::AsyncLazy<String>,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Serialize)]
 pub enum DownloadSerializedError {
     #[error("Given path can't be converted to unicode")]
     NonUnicodePath,
-    #[error("Cannot serialize download data")]
-    SerializationError(#[from] serde_json::Error),
-    #[error("Failed to write download data to disk")]
-    WriteError(#[from] std::io::Error),
+    #[error("Cannot serialize download data. Reason: {0}")]
+    SerializationError(String),
+    #[error("Failed to write download data to disk. Reason: {0}")]
+    WriteError(String),
+}
+impl From<serde_json::Error> for DownloadSerializedError {
+    fn from(err: serde_json::Error) -> Self {
+        DownloadSerializedError::SerializationError(err.to_string())
+    }
+}
+impl From<std::io::Error> for DownloadSerializedError {
+    fn from(err: std::io::Error) -> Self {
+        DownloadSerializedError::WriteError(err.to_string())
+    }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Serialize)]
+#[serde(tag = "kind", content = "payload")]
 pub enum DownloadItemCreationError {
-    #[error("Request failed!")]
-    RequestError(#[from] reqwest::Error),
+    #[error("Request failed! Error: {0}")]
+    RequestError(String),
     #[error("There are more segments than length")]
     SegmentationLengthError(#[from] segmenter::MakingSegmentError),
     #[error("Server doesn't supported segmented downloads")]
@@ -71,6 +82,11 @@ pub enum DownloadItemCreationError {
     LengthGettingError(#[from] length_getter::LengthGettingErrors),
     #[error("Cannot serialize download data to disk")]
     SerializationError(#[from] DownloadSerializedError),
+}
+impl From<reqwest::Error> for DownloadItemCreationError {
+    fn from(err: reqwest::Error) -> Self {
+        DownloadItemCreationError::RequestError(err.to_string())
+    }
 }
 impl SegmentedDownloadItem {
     pub async fn new(
@@ -114,7 +130,7 @@ impl SegmentedDownloadItem {
         let (status_sender, status_reciever) =
             tokio::sync::watch::channel(statuses::DownloadStatus::Pending);
         let filepath_clone = full_path.clone();
-        let url_clone = url.clone().to_string();
+        let url_clone = url.to_string();
         let client_clone = client.clone();
         let filename = AsyncLazy::new(move || {
             let client = client_clone.clone();
@@ -133,7 +149,7 @@ impl SegmentedDownloadItem {
             segments_to_run: required_segments,
             status_getters: required_segment_getters,
             client,
-            status_sender: status_sender.into(),
+            status_sender,
             status_reciever,
             url: url.to_string(),
             filepath: full_path,
@@ -164,7 +180,7 @@ impl SegmentedDownloadItem {
         let to_serialize_to = format!("{}.json", filename.to_str().unwrap());
         let serialized = serde_json::to_string_pretty(&to_serialize)?;
         fs::write(
-            path::Path::join(&self.filepath.parent().unwrap(), to_serialize_to),
+            path::Path::join(self.filepath.parent().unwrap(), to_serialize_to),
             serialized,
         )
         .await?;
@@ -184,7 +200,7 @@ impl SegmentedDownloadItem {
             {
                 return Err(current_err);
             }
-            self.status_sender.send(statuses::DownloadStatus::Pending);
+            let _ = self.status_sender.send(statuses::DownloadStatus::Pending);
             status_reviever_borrow_maybe_err = statuses::DownloadStatus::Pending;
         }
         let current_status = status_reviever_borrow_maybe_err.clone();
@@ -194,7 +210,7 @@ impl SegmentedDownloadItem {
         let status_sender = &self.status_sender;
         let _ = status_sender.send(statuses::DownloadStatus::Running {
             downloaded: 0,
-            total: self.filesize,
+            total: Some(self.filesize),
         });
         let mut futures: FutureVec<Result<(), DownloadRunError>> = vec![];
         for segment in self.segments_to_run.iter() {
@@ -208,7 +224,8 @@ impl SegmentedDownloadItem {
         }
         //This must've succeeded so far
         let mut final_file = tokio::fs::OpenOptions::new()
-            .create_new(true)
+            .create(true)
+            .truncate(true)
             .write(true)
             .open(&self.filepath)
             .await?;
@@ -226,9 +243,9 @@ impl SegmentedDownloadItem {
 impl IDownloadItem for SegmentedDownloadItem {
     async fn start(&self) -> Result<(), DownloadRunError> {
         let err_maybe = self.start_helper().await;
-        if err_maybe.is_err() {
-            let err = err_maybe.unwrap_err();
-            self.status_sender
+        if let Err(err) = err_maybe {
+            let _ = self
+                .status_sender
                 .send(statuses::DownloadStatus::Failed(err));
         }
         return Ok(());
@@ -288,5 +305,11 @@ impl IDownloadItem for SegmentedDownloadItem {
                 .to_string();
         }
         self.filepath.to_str().unwrap().to_string()
+    }
+    fn get_update_interval_ms(&self) -> u64 {
+        self.polling_rate_ms
+    }
+    fn get_url(&self) -> String {
+        self.url.clone()
     }
 }
