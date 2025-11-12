@@ -1,19 +1,26 @@
+use serde::Serialize;
 use thiserror::Error;
-use url::ParseError;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Serialize)]
+#[serde(tag = "kind", content = "payload")]
 pub enum FilepathGettingError {
     #[error("Unreachable Server")]
     UnreachableServer,
     #[error("Request failed")]
-    RequestError(#[from] reqwest::Error),
+    RequestError(String),
     #[error("No content disposition")]
     ContentDispositionLess,
     #[error("No filename")]
     Filenameless,
-    #[error("Invalid url")]
-    InvalidUrl(#[from] ParseError),
+    #[error("Given url is invalid. Url: {0}")]
+    InvalidUrl(String),
 }
+impl From<reqwest::Error> for FilepathGettingError {
+    fn from(e: reqwest::Error) -> Self {
+        FilepathGettingError::RequestError(e.to_string())
+    }
+}
+
 pub async fn get_filename(
     client: reqwest::Client,
     url: &str,
@@ -38,7 +45,8 @@ pub async fn get_filename(
     if trimmed_url.ends_with("/") {
         return Err(FilepathGettingError::Filenameless);
     }
-    let url_parsed = url::Url::parse(url)?;
+    let url_parsed =
+        url::Url::parse(url).map_err(|_| FilepathGettingError::InvalidUrl(url.to_owned()))?;
     let url_segments_maybe = url_parsed.path_segments();
     if let Some(mut url_segments) = url_segments_maybe {
         let result_or_err = url_segments

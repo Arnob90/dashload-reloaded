@@ -9,8 +9,8 @@ use serde::Serialize;
 pub trait IDownloadItem: Send + Sync {
     async fn start(&self) -> Result<(), DownloadRunError>;
     fn get_status(&self) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError>;
-    async fn filename(&self) -> String;
-    async fn filepath(&self) -> String;
+    fn filename(&self) -> String;
+    fn filepath(&self) -> String;
     fn get_url(&self) -> String;
     fn get_update_interval_ms(&self) -> u64;
 }

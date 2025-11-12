@@ -1,0 +1,24 @@
+/* MyTable.module.css */
+
+.table_row {
+	/* Add a transition for a smooth effect */
+	transition: background-color 0.15s ease-in-out;
+	cursor: pointer;
+}
+
+.table_row:hover {
+	/* A subtle hover effect is good UX */
+	background-color: rgba(255, 255, 255, 0.05);
+}
+
+.selected_row {
+	/* You can still have the hover effect */
+	background-color: rgba(0, 200, 255, 0.2);
+	cursor: pointer;
+
+	/* --- The Magic Trick --- */
+	/* We create a huge, red, semi-transparent shadow that is drawn
+     INSIDE the element's bounds. This creates the overlay effect
+     without needing any pseudo-elements or positioning hacks. */
+	box-shadow: inset 0 0 0 9999px rgba(255, 0, 0, 0.4);
+}

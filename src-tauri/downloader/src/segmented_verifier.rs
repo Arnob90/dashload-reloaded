@@ -19,6 +19,10 @@ pub enum SegmentVerificationError {
     InvalidHeaderValue, // New variant for the parse error
     #[error("Server error. Error code: {0}")]
     ServerFailure(u16),
+    #[error("Cannot find metadata for resumption")]
+    NoMetadataFile,
+    #[error("The given download is not segmented")]
+    NoSegments,
 }
 impl From<reqwest::Error> for SegmentVerificationError {
     fn from(err: reqwest::Error) -> Self {

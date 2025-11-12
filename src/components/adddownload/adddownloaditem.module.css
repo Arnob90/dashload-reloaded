@@ -1,3 +1,8 @@
 .text_input {
     flex: 2;
 }
+
+.text-box {
+    align-items: center;
+    height: 100%;
+}

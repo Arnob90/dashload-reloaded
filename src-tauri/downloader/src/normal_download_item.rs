@@ -1,14 +1,37 @@
 use async_trait::async_trait;
+use serde::Serialize;
+use thiserror::Error;
+use tokio::fs::{self};
 use tokio::io::AsyncWriteExt;
 
-use crate::filename_getter::get_filename;
+use crate::download_data::DownloadData;
 use crate::idownloaditem::IDownloadItem;
-use crate::lazy::AsyncLazy;
+use crate::normal_download_strategies::{
+    DownloadStrategy, FullDownloadStrategy, ResumedDownloadStrategy,
+};
 use crate::segment::{self, DownloadRunError};
 use crate::{length_getter, statuses};
 use std::path::{self, Path};
 use std::time::Duration;
 use tokio::select;
+#[derive(Error, Debug, Serialize)]
+#[serde(tag = "kind", content = "payload")]
+pub enum NormalDownloadItemCreationError {
+    #[error("The given filepath is that of a directory. Filepath: {0}")]
+    DirectoryGivenError(String),
+    #[error("Cannot create the metadata file for download!")]
+    MetadataFileCreationError,
+    #[error("Cannot resume a download which has no metadata!")]
+    NoMetadataFile,
+    #[error("Given metadata file is invalid")]
+    InvalidMetadataFile,
+    #[error("No file to resume from!")]
+    NoFileToResume,
+    #[error("The file must've changed on the server side")]
+    FileChangedOnServer,
+    #[error("Failed to get filesize of file to resume")]
+    FileSizeGettingError,
+}
 pub struct NormalDownloadItem {
     pub url: String,
     pub filepath: path::PathBuf,
@@ -17,7 +40,8 @@ pub struct NormalDownloadItem {
     pub client: reqwest::Client,
     pub filesize: Option<u64>,
     pub update_interval: u64,
-    pub filename: AsyncLazy<String>,
+    pub start: u64,
+    pub download_strategy: Box<dyn DownloadStrategy>,
 }
 
 impl NormalDownloadItem {
@@ -26,29 +50,20 @@ impl NormalDownloadItem {
         filepath: path::PathBuf,
         client: reqwest::Client,
         update_interval: u64,
-    ) -> NormalDownloadItem {
-        let url_copy = url.clone();
+    ) -> Result<NormalDownloadItem, NormalDownloadItemCreationError> {
         let length = length_getter::get_length(client.clone(), &url).await.ok();
-        let client_clone = client.clone();
+        if filepath.is_dir() {
+            return Err(NormalDownloadItemCreationError::DirectoryGivenError(
+                filepath.to_str().unwrap().to_string(),
+            ));
+        }
+        filepath
+            .file_name()
+            .ok_or(NormalDownloadItemCreationError::DirectoryGivenError(
+                filepath.to_str().unwrap().to_string(),
+            ))?;
         let (sender, reciever) = tokio::sync::watch::channel(statuses::DownloadStatus::Pending);
-        //I wish we could take a closure directly.
-        //BUT THAT REQUIRES FN ONCE.
-        //We need the factory pattern
-        let filepath_clone = filepath.clone();
-        let filename = AsyncLazy::new(move || {
-            let client = client_clone.clone();
-            let url = url_copy.clone();
-            let filepath = filepath_clone.clone();
-            async move {
-                if filepath.is_file() {
-                    return filepath.file_name().unwrap().to_str().unwrap().to_string();
-                }
-                get_filename(client, &url)
-                    .await
-                    .unwrap_or("untitled".to_string())
-            }
-        });
-        Self {
+        let required_item = Self {
             url,
             filepath,
             status_sender: sender,
@@ -56,10 +71,68 @@ impl NormalDownloadItem {
             client,
             filesize: length,
             update_interval,
-            filename,
+            start: 0,
+            download_strategy: Box::new(FullDownloadStrategy {}),
+        };
+        required_item
+            .serialize()
+            .await
+            .map_err(|_| NormalDownloadItemCreationError::MetadataFileCreationError)?;
+        Ok(required_item)
+    }
+    async fn resume_from_file(
+        client: reqwest::Client,
+        filepath: path::PathBuf,
+        update_interval: u64,
+    ) -> Result<NormalDownloadItem, NormalDownloadItemCreationError> {
+        if filepath.is_dir() {
+            return Err(NormalDownloadItemCreationError::DirectoryGivenError(
+                filepath.to_str().unwrap().to_string(),
+            ));
         }
+        let required_metadata_filename =
+            format!("{}.json", filepath.file_name().unwrap().to_str().unwrap());
+        let metadata_path =
+            path::Path::join(filepath.parent().unwrap(), required_metadata_filename);
+        let deserialized_data_txt = fs::read_to_string(metadata_path)
+            .await
+            .map_err(|_| NormalDownloadItemCreationError::NoMetadataFile)?;
+        let deserialized_data: DownloadData = serde_json::from_str(&deserialized_data_txt)
+            .map_err(|_| NormalDownloadItemCreationError::InvalidMetadataFile)?;
+        let required_filepath_str = deserialized_data.filepath;
+        let len = length_getter::get_length(client.clone(), &deserialized_data.url)
+            .await
+            .ok();
+        let required_filepath = Path::new(&required_filepath_str);
+        if !required_filepath.exists() {
+            return Err(NormalDownloadItemCreationError::NoFileToResume);
+        }
+        if len != deserialized_data.length {
+            return Err(NormalDownloadItemCreationError::FileChangedOnServer);
+        }
+        let file_metadata = fs::metadata(&required_filepath_str)
+            .await
+            .map_err(|_| NormalDownloadItemCreationError::FileSizeGettingError)?;
+        let start = file_metadata.len();
+        let required_item = Self {
+            url: deserialized_data.url,
+            filepath: required_filepath.to_path_buf(),
+            status_sender: tokio::sync::watch::channel(statuses::DownloadStatus::Pending).0,
+            status_reciever: tokio::sync::watch::channel(statuses::DownloadStatus::Pending).1,
+            client,
+            filesize: len,
+            update_interval,
+            start,
+            download_strategy: Box::new(ResumedDownloadStrategy {
+                start_offset: start,
+                end: None,
+            }),
+        };
+        Ok(required_item)
     }
 }
+#[derive(Error, Debug)]
+pub enum FileGettingError {}
 
 impl NormalDownloadItem {
     async fn start_helper(&self) -> Result<(), DownloadRunError> {
@@ -72,25 +145,16 @@ impl NormalDownloadItem {
             total: self.filesize,
         });
         let client_to_use = self.client.clone();
-        let mut res = client_to_use.get(&self.url).send().await?;
+        let mut res = self.download_strategy.run(client_to_use, &self.url).await?;
         if !res.status().is_success() {
             return Err(DownloadRunError::ServerNotAvailable);
         }
-        let mut filepath = self.filepath.as_path().to_path_buf();
-        if filepath.is_dir() {
-            let filename = get_filename(self.client.clone(), &self.url)
-                .await
-                .unwrap_or("untitled".to_string());
-            let filename_path = Path::new(&filename);
-            filepath = filepath.join(filename_path);
-        }
-        let mut file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(filepath)
-            .await?;
-        let mut downloaded_so_far: u64 = 0;
+        let mut file = self
+            .download_strategy
+            .get_file(&self.filepath)
+            .await
+            .map_err(|_| DownloadRunError::FileOpenError)?;
+        let mut downloaded_so_far = self.download_strategy.get_start();
         let mut interval = tokio::time::interval(Duration::from_millis(self.update_interval));
         loop {
             select! {
@@ -112,6 +176,22 @@ impl NormalDownloadItem {
         let _ = required_sender.send(statuses::DownloadStatus::Completed);
         Ok(())
     }
+    async fn serialize(&self) -> Result<(), std::io::Error> {
+        let required_data = DownloadData {
+            url: self.url.clone(),
+            filepath: self.filepath.to_str().unwrap().to_string(),
+            segments: None,
+            length: self.filesize,
+        };
+        let filename = self.filepath.file_name().unwrap();
+        let to_serialize_to = format!("{}.json", filename.to_str().unwrap());
+        let serialized = serde_json::to_string_pretty(&required_data).unwrap();
+        fs::write(
+            path::Path::join(self.filepath.parent().unwrap(), to_serialize_to),
+            serialized,
+        )
+        .await
+    }
 }
 
 #[async_trait]
@@ -128,18 +208,15 @@ impl IDownloadItem for NormalDownloadItem {
     fn get_status(&self) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError> {
         Ok(self.status_reciever.borrow().clone())
     }
-    async fn filename(&self) -> String {
-        self.filename.get().await
+    fn filename(&self) -> String {
+        self.filepath
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
     }
-    async fn filepath(&self) -> String {
-        if self.filepath.is_dir() {
-            return self
-                .filepath
-                .join(self.filename.get().await)
-                .to_str()
-                .unwrap()
-                .to_string();
-        }
+    fn filepath(&self) -> String {
         self.filepath.to_str().unwrap().to_string()
     }
     fn get_url(&self) -> String {

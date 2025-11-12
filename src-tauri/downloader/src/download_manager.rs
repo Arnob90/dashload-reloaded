@@ -1,21 +1,28 @@
 use crate::idownloaditem::IDownloadData;
 use crate::misc::FutureVec;
+use crate::normal_download_item::NormalDownloadItemCreationError;
 use crate::segment::DownloadStatusCheckError;
 use crate::statuses;
 use crate::{
     idownloaditem::{IDownloadItem, RichDownloadStatus},
     normal_download_item::NormalDownloadItem,
     segment,
-    segmented_download_item::{DownloadItemCreationError, SegmentedDownloadItem},
+    segmented_download_item::{SegmentedDownloadItem, SegmentedDownloadItemCreationError},
 };
 use dashmap::DashMap;
 use futures::future::join_all;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
-use thiserror::Error;
 use tokio::time::Instant;
 use uuid::Uuid;
+#[derive(Serialize)]
+#[serde(tag = "kind", content = "payload")]
+pub enum SmartDownloadItemError {
+    Normal(NormalDownloadItemCreationError),
+    Segmented(SegmentedDownloadItemCreationError),
+}
 
 pub struct DownloadManager {
     pub download_items: HashMap<String, Arc<dyn IDownloadItem>>,
@@ -23,32 +30,26 @@ pub struct DownloadManager {
     pub poll_every_ms: u64,
     pub status_history: DashMap<String, (statuses::DownloadStatus, Instant)>,
 }
-#[derive(Error, Debug, Serialize)]
-pub enum SegmentedDownloadAddErrors {
-    #[error("Cannot create segmented download")]
-    SegmentDownloadCreationError(#[from] DownloadItemCreationError),
-}
-
 impl DownloadManager {
-    pub fn new(poll_every_ms: u64) -> DownloadManager {
+    pub fn new(client: reqwest::Client, poll_every_ms: u64) -> DownloadManager {
         Self {
             download_items: HashMap::new(),
-            client: reqwest::Client::new(),
             poll_every_ms,
+            client,
             status_history: DashMap::new(),
         }
     }
     pub async fn add_download_segmented(
         &mut self,
         url: String,
-        filepath: String,
+        filepath: PathBuf,
         number_of_segments: u64,
-    ) -> Result<(), SegmentedDownloadAddErrors> {
+    ) -> Result<(), SegmentedDownloadItemCreationError> {
         let required_download_item = Arc::new(
             SegmentedDownloadItem::new(
                 self.client.clone(),
                 &url,
-                &filepath,
+                filepath,
                 number_of_segments,
                 self.poll_every_ms,
             )
@@ -63,15 +64,13 @@ impl DownloadManager {
         self.download_items.insert(uuid_str, required_download_item);
         Ok(())
     }
-    pub async fn add_download_normal(&mut self, url: String, filepath: String) {
+    pub async fn add_download_normal(
+        &mut self,
+        url: String,
+        filepath: PathBuf,
+    ) -> Result<(), NormalDownloadItemCreationError> {
         let required_download_item = Arc::new(
-            NormalDownloadItem::new(
-                url,
-                filepath.into(),
-                self.client.clone(),
-                self.poll_every_ms,
-            )
-            .await,
+            NormalDownloadItem::new(url, filepath, self.client.clone(), self.poll_every_ms).await?,
         );
         let required_item_clone = required_download_item.clone();
         tokio::spawn(async move {
@@ -79,25 +78,42 @@ impl DownloadManager {
         });
         let uuid = Uuid::new_v4().as_simple().to_string();
         self.download_items.insert(uuid, required_download_item);
+        Ok(())
+    }
+    pub async fn add_download_smart(
+        &mut self,
+        url: String,
+        filepath: PathBuf,
+    ) -> Result<(), SmartDownloadItemError> {
+        let required_segmented_item = self
+            .add_download_segmented(url.clone(), filepath.clone(), 3)
+            .await;
+        if let Err(e) = required_segmented_item {
+            match e {
+                SegmentedDownloadItemCreationError::SegmentFailed(_) => self
+                    .add_download_normal(url, filepath)
+                    .await
+                    .map_err(SmartDownloadItemError::Normal)?,
+                SegmentedDownloadItemCreationError::LengthGettingError(_) => self
+                    .add_download_normal(url, filepath)
+                    .await
+                    .map_err(SmartDownloadItemError::Normal)?,
+                _ => return Err(SmartDownloadItemError::Segmented(e)),
+            }
+        }
+        Ok(())
     }
     // Renamed to be more explicit about what it does.
     pub async fn get_download_data_from_item(
         &self,
         item_id: &str,
     ) -> Result<IDownloadData, DownloadStatusCheckError> {
-        // --- Phase 1: Fetch all data concurrently (no locks) ---
-        // This is the long-running part.
         let item = self.download_items.get(item_id).unwrap();
-
-        let (filepath, filename, url, current_status) = tokio::join!(
-            item.filepath(),
-            item.filename(),
-            async { item.get_url() },
-            async { item.get_status() } // Wrap sync function in async block for join
-        );
-        let current_status = current_status?; // Propagate error from get_status
-
-        // --- Phase 2: Calculate speed and update history atomically ---
+        let filename = item.filename();
+        let filepath = item.filepath();
+        let url = item.get_url();
+        let current_status = item.get_status()?;
+        // --- Phase 1: Calculate speed and update history atomically ---
         let now = Instant::now();
         let mut speed_mbps = 0.0; // Default to 0
 
@@ -125,7 +141,7 @@ impl DownloadManager {
         {
             let time_elapsed = now.duration_since(*prev_time).as_secs_f64();
             if time_elapsed > 0.0 {
-                let bytes_diff = (*current_bytes - *prev_bytes) as f64;
+                let bytes_diff = (current_bytes - prev_bytes) as f64;
                 if bytes_diff >= 0.0 {
                     speed_mbps = (bytes_diff / 1024.0 / 1024.0) / time_elapsed;
                 }
@@ -137,7 +153,7 @@ impl DownloadManager {
 
         // The DashMap lock is released when `history_entry` goes out of scope here.
 
-        // --- Phase 3: Translate to the rich DTO
+        // --- Phase 2: Translate to the rich DTO
         let rich_status = match current_status {
             statuses::DownloadStatus::Running { downloaded, total } => {
                 RichDownloadStatus::Running {

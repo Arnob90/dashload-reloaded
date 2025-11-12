@@ -1,10 +1,13 @@
-import { useMemo } from "react"
-import { GetStatusFullResult } from "../../code/typesofbackend"
+import { useMemo, useState } from "react"
+import { GetStatusFullResult } from "../../code/typesOfBackend.ts"
 import { List } from "immutable"
 import { Table, Text } from "@mantine/core"
+import { bytesToMIB } from "../../code/utils.ts"
 import { createColumnHelper, getCoreRowModel, useReactTable, flexRender } from "@tanstack/react-table"
+import style from "./downloadtable.module.css"
+import { SelectableItemsTable } from "../selectabletable/selectableItemsTable.tsx"
 export type StatusFullResultValue = GetStatusFullResult[keyof GetStatusFullResult]
-export interface StatusView {
+export type StatusViewWithoutId = {
     filename: string,
     status: string,
     downloaded: number | null,
@@ -13,10 +16,10 @@ export interface StatusView {
     downloaded_portion: number | null,
     eta_secs: number | null
 }
-
-function bytesToMIB(bytes: number): number {
-    return Number((bytes / 1024 / 1024).toFixed(2))
+export type StatusView = StatusViewWithoutId & {
+    id: string
 }
+
 function formatTime(seconds: number): string {
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
@@ -29,7 +32,7 @@ function formatTime(seconds: number): string {
 
     return `${paddedHrs}:${paddedMins}:${paddedSecs}`;
 }
-function convertStatusToView(givenStatus: StatusFullResultValue): StatusView {
+function convertStatusToView(givenStatus: StatusFullResultValue): StatusViewWithoutId {
     const filename = givenStatus.filename;
     const status = givenStatus.status.kind;
     if (status === "Running") {
@@ -53,11 +56,21 @@ function convertStatusToView(givenStatus: StatusFullResultValue): StatusView {
         eta_secs: null
     }
 }
+function convertStatusDictToView(givenStatus: GetStatusFullResult): List<StatusView> {
+    let requiredArr = List<StatusView>([])
+    for (const id in givenStatus) {
+        const result = givenStatus[id]
+        const view = convertStatusToView(result)
+        requiredArr = requiredArr.push({ ...view, id: id })
+    }
+    return requiredArr
+}
 export interface DownloadTableProps {
-    toRender: List<StatusFullResultValue>
+    toRender: GetStatusFullResult
 }
 export function DownloadTable({ toRender }: DownloadTableProps) {
-    const requiredArr = useMemo(() => toRender.map((toMap) => convertStatusToView(toMap)).toArray(), [toRender])
+    const requiredArr = useMemo(() => convertStatusDictToView(toRender).toArray(), [toRender])
+    const [selectedId, setSelectedId] = useState<string | null>("")
     const columnHelper = createColumnHelper<StatusView>()
     const columns = [
         columnHelper.accessor("filename", {
@@ -95,7 +108,7 @@ export function DownloadTable({ toRender }: DownloadTableProps) {
         getCoreRowModel: getCoreRowModel()
     })
     return (
-        <Table>
+        <SelectableItemsTable setSelectedId={setSelectedId}>
             <Table.Thead>
                 {tableModel.getHeaderGroups().map((headerGroup) => (
                     <Table.Tr key={headerGroup.id}>
@@ -114,7 +127,13 @@ export function DownloadTable({ toRender }: DownloadTableProps) {
             </Table.Thead>
             <Table.Tbody>
                 {tableModel.getRowModel().rows.map((row) => (
-                    <Table.Tr key={row.id}>
+                    <Table.Tr key={row.id} tabIndex={0} onClick={() => {
+                        if (selectedId === row.original.id) {
+                            setSelectedId(null)
+                            return
+                        }
+                        setSelectedId(row.original.id)
+                    }} className={row.original.id === selectedId ? `${style.selected_row}` : `${style.table_row}`}>
                         {row.getVisibleCells().map((cell) => (
                             <Table.Td key={cell.id}>
                                 {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -123,6 +142,6 @@ export function DownloadTable({ toRender }: DownloadTableProps) {
                     </Table.Tr>
                 ))}
             </Table.Tbody>
-        </Table>
+        </SelectableItemsTable>
     )
 }

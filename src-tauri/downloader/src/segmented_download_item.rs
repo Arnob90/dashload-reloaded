@@ -1,7 +1,7 @@
-use crate::lazy::AsyncLazy;
+use crate::download_data::DownloadData;
 use crate::misc::FutureVec;
+use crate::segment::SegmentStatusGetter;
 use crate::{
-    filename_getter,
     idownloaditem::IDownloadItem,
     length_getter,
     segment::{self, DownloadRunError, DownloadStatusCheckError, Segment, SegmentData},
@@ -10,21 +10,14 @@ use crate::{
     statuses::{self, DownloadStatus},
 };
 use async_trait::async_trait;
-use filename_getter::get_filename;
 use futures::future::join_all;
 use getset;
 use getset::{CloneGetters, Getters};
 use reqwest::{self};
-use serde::{Deserialize, Serialize};
-use std::path;
+use serde::Serialize;
+use std::path::{self, Path, PathBuf};
 use thiserror::Error;
 use tokio::{fs, io::AsyncWriteExt};
-#[derive(Serialize, Deserialize)]
-pub struct DownloadData {
-    pub url: String,
-    pub filepath: String,
-    pub segments: Option<Vec<SegmentData>>,
-}
 
 #[derive(Getters, CloneGetters)]
 pub struct SegmentedDownloadItem {
@@ -44,7 +37,6 @@ pub struct SegmentedDownloadItem {
     filesize: u64,
     #[getset(get_copy = "pub")]
     polling_rate_ms: u64,
-    filename: crate::lazy::AsyncLazy<String>,
 }
 
 #[derive(Error, Debug, Serialize)]
@@ -69,7 +61,7 @@ impl From<std::io::Error> for DownloadSerializedError {
 
 #[derive(Error, Debug, Serialize)]
 #[serde(tag = "kind", content = "payload")]
-pub enum DownloadItemCreationError {
+pub enum SegmentedDownloadItemCreationError {
     #[error("Request failed! Error: {0}")]
     RequestError(String),
     #[error("There are more segments than length")]
@@ -82,69 +74,60 @@ pub enum DownloadItemCreationError {
     LengthGettingError(#[from] length_getter::LengthGettingErrors),
     #[error("Cannot serialize download data to disk")]
     SerializationError(#[from] DownloadSerializedError),
+    #[error("Invalid filepath: {0}")]
+    InvalidFilepathError(String),
+    #[error("There is no segment to deserialize in resume")]
+    NoSegmentsInDownloadData,
 }
-impl From<reqwest::Error> for DownloadItemCreationError {
+impl From<reqwest::Error> for SegmentedDownloadItemCreationError {
     fn from(err: reqwest::Error) -> Self {
-        DownloadItemCreationError::RequestError(err.to_string())
+        SegmentedDownloadItemCreationError::RequestError(err.to_string())
     }
 }
 impl SegmentedDownloadItem {
-    pub async fn new(
+    async fn divide_into_segments(
         client: reqwest::Client,
         url: &str,
-        filepath_str: &str,
+        filepath: &Path,
         number_of_segments: u64,
-        polling_rate_ms: u64,
-    ) -> Result<SegmentedDownloadItem, DownloadItemCreationError> {
-        let filepath_to_download = path::Path::new(filepath_str);
-        let full_path = if filepath_to_download.is_dir() {
-            let filename = filename_getter::get_filename(client.clone(), url)
-                .await
-                .unwrap_or("untitled".to_string());
-            filepath_to_download.join(filename)
-        } else {
-            filepath_to_download.to_path_buf()
-        };
-
-        let full_path_str = full_path
-            .to_str()
-            .ok_or(DownloadItemCreationError::NonUnicodePath)?
-            .to_string();
-        let length = length_getter::get_length(client.clone(), url).await?;
+        length: u64,
+    ) -> Result<Vec<(Segment, SegmentStatusGetter)>, SegmentedDownloadItemCreationError> {
         let segment_ranges = segment_into_portions(length, number_of_segments)?;
-        let mut required_segments: Vec<Segment> = vec![];
-        let mut required_segment_getters: Vec<segment::SegmentStatusGetter> = vec![];
+        let mut required_segments: Vec<(Segment, SegmentStatusGetter)> = vec![];
         for (i, segment_range) in segment_ranges.iter().enumerate() {
-            let segment_path = format!("{}.{}", full_path_str, i);
+            let segment_path = format!("{}.{}", filepath.to_str().unwrap(), i);
             let segment_data = SegmentData {
                 start: segment_range.start,
                 end: segment_range.end,
                 url: url.to_string(),
-                filepath: segment_path.clone(),
+                filepath: segment_path.clone().into(),
             };
-            let (required_segment, segment_status_getter) =
-                Segment::new(client.clone(), segment_data, polling_rate_ms).await?;
-            required_segments.push(required_segment);
-            required_segment_getters.push(segment_status_getter);
+            let segment_and_getter = Segment::new(client.clone(), segment_data, 0).await?;
+            required_segments.push(segment_and_getter);
         }
+        Ok(required_segments)
+    }
+    pub async fn new(
+        client: reqwest::Client,
+        url: &str,
+        filepath: PathBuf,
+        number_of_segments: u64,
+        polling_rate_ms: u64,
+    ) -> Result<SegmentedDownloadItem, SegmentedDownloadItemCreationError> {
+        let filepath_to_download = &filepath;
+        filepath_to_download.file_name().ok_or(
+            SegmentedDownloadItemCreationError::InvalidFilepathError(
+                filepath.to_str().unwrap().to_string(),
+            ),
+        )?;
+        let length = length_getter::get_length(client.clone(), url).await?;
+        let required_segments_and_getters =
+            Self::divide_into_segments(client.clone(), url, &filepath, number_of_segments, length)
+                .await?;
+        let (required_segments, required_segment_getters) =
+            required_segments_and_getters.into_iter().unzip();
         let (status_sender, status_reciever) =
             tokio::sync::watch::channel(statuses::DownloadStatus::Pending);
-        let filepath_clone = full_path.clone();
-        let url_clone = url.to_string();
-        let client_clone = client.clone();
-        let filename = AsyncLazy::new(move || {
-            let client = client_clone.clone();
-            let url = url_clone.to_string();
-            let filepath = filepath_clone.clone();
-            async move {
-                if filepath.is_file() {
-                    return filepath.file_name().unwrap().to_str().unwrap().to_string();
-                }
-                get_filename(client, &url)
-                    .await
-                    .unwrap_or("untitled".to_string())
-            }
-        });
         let required_segment = Self {
             segments_to_run: required_segments,
             status_getters: required_segment_getters,
@@ -152,13 +135,57 @@ impl SegmentedDownloadItem {
             status_sender,
             status_reciever,
             url: url.to_string(),
-            filepath: full_path,
+            filepath: filepath_to_download.to_path_buf(),
             filesize: length,
             polling_rate_ms,
-            filename,
         };
         required_segment.serialize_data().await?;
         Ok(required_segment)
+    }
+    pub async fn resume(
+        client: reqwest::Client,
+        filepath: PathBuf,
+        polling_rate_ms: u64,
+    ) -> Result<SegmentedDownloadItem, SegmentedDownloadItemCreationError> {
+        let metadata_file: PathBuf =
+            format!("{}.json", filepath.file_name().unwrap().to_str().unwrap()).into();
+        let filepath_to_download = &filepath;
+        filepath_to_download.file_name().ok_or(
+            SegmentedDownloadItemCreationError::InvalidFilepathError(
+                filepath.to_str().unwrap().to_string(),
+            ),
+        )?;
+        let data = fs::read_to_string(metadata_file).await.unwrap();
+        let required_data: DownloadData = serde_json::from_str(&data).unwrap();
+        let segment_datas_maybe = required_data.segments;
+        if segment_datas_maybe.is_none() {
+            return Err(SegmentedDownloadItemCreationError::SegmentFailed(
+                segmented_verifier::SegmentVerificationError::NoSegments,
+            ));
+        }
+        let segment_datas = segment_datas_maybe.unwrap();
+        let mut required_segments: Vec<Segment> = vec![];
+        let mut required_segment_getters: Vec<SegmentStatusGetter> = vec![];
+        for segment_data in segment_datas {
+            let (segment, getter) =
+                Segment::new(client.clone(), segment_data, polling_rate_ms).await?;
+            required_segments.push(segment);
+            required_segment_getters.push(getter);
+        }
+        let (status_sender, status_reciever) =
+            tokio::sync::watch::channel(statuses::DownloadStatus::Pending);
+        let required_item = Self {
+            segments_to_run: required_segments,
+            status_getters: required_segment_getters,
+            client,
+            status_sender,
+            status_reciever,
+            url: required_data.url,
+            filepath: filepath_to_download.to_path_buf(),
+            filesize: required_data.length.unwrap(),
+            polling_rate_ms,
+        };
+        Ok(required_item)
     }
     pub async fn serialize_data(&self) -> Result<(), DownloadSerializedError> {
         let to_serialize = DownloadData {
@@ -168,6 +195,7 @@ impl SegmentedDownloadItem {
                 .to_str()
                 .ok_or(DownloadSerializedError::NonUnicodePath)?
                 .to_string(),
+            length: Some(self.filesize),
             segments: Some(
                 self.segments_to_run
                     .iter()
@@ -292,17 +320,17 @@ impl IDownloadItem for SegmentedDownloadItem {
         }
         Ok(current_status.clone())
     }
-    async fn filename(&self) -> String {
-        self.filename.get().await
+    fn filename(&self) -> String {
+        self.filepath
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
     }
-    async fn filepath(&self) -> String {
+    fn filepath(&self) -> String {
         if self.filepath.is_dir() {
-            return self
-                .filepath
-                .join(self.filename.get().await)
-                .to_str()
-                .unwrap()
-                .to_string();
+            return self.filepath.to_str().unwrap().to_string();
         }
         self.filepath.to_str().unwrap().to_string()
     }

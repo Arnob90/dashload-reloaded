@@ -1,19 +1,21 @@
+use crate::normal_download_strategies;
 use crate::segmented_verifier::{SegmentVerificationError, verify_segmented};
 use crate::statuses::DownloadStatus;
 use reqwest::{self, Client};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
-
 // --- Composition: Common data is in one place ---
 #[derive(Clone, Serialize, Deserialize)] // Clone is useful for retrying
 pub struct SegmentData {
     pub start: u64,
     pub end: u64,
     pub url: String,
-    pub filepath: String,
+    pub filepath: PathBuf,
 }
 
 pub struct Segment {
@@ -21,6 +23,7 @@ pub struct Segment {
     pub sender: watch::Sender<DownloadStatus>,
     pub client: Client,
     pub polling_rate: u64,
+    pub strategy: Box<dyn normal_download_strategies::DownloadStrategy>,
 }
 pub enum GetFilePathError {
     RequestError(reqwest::Error),
@@ -56,6 +59,10 @@ pub enum DownloadRunError {
     FileWriteError(String),
     #[error("Download cannot be run twice")]
     AlreadyRunning,
+    #[error("The file does not match the one kept before resumption")]
+    FileMismatch,
+    #[error("Given path is one to a dir")]
+    DirectoryGivenError,
 }
 
 impl From<reqwest::Error> for DownloadRunError {
@@ -93,12 +100,47 @@ impl Segment {
             given_data.end,
         )
         .await?;
+        let strategy = normal_download_strategies::ResumedDownloadStrategy {
+            start_offset: given_data.start,
+            end: Some(given_data.end),
+        };
         let (sender, reciever) = watch::channel(DownloadStatus::Pending);
         let required_segment = Segment {
             data: given_data,
             sender,
             client,
             polling_rate,
+            strategy: Box::new(strategy),
+        };
+        Ok((required_segment, SegmentStatusGetter { reciever }))
+    }
+    pub async fn resume_from_file(
+        client: reqwest::Client,
+        given_data: SegmentData,
+        polling_rate: u64,
+    ) -> Result<(Segment, SegmentStatusGetter), SegmentVerificationError> {
+        verify_segmented(
+            client.clone(),
+            &given_data.url,
+            given_data.start,
+            given_data.end,
+        )
+        .await?;
+        let file = fs::metadata(&given_data.filepath)
+            .await
+            .map_err(|_| SegmentVerificationError::NoMetadataFile)?;
+        let len = file.len();
+        let strategy = normal_download_strategies::ResumedDownloadStrategy {
+            start_offset: len,
+            end: Some(given_data.end),
+        };
+        let (sender, reciever) = watch::channel(DownloadStatus::Pending);
+        let required_segment = Segment {
+            data: given_data,
+            sender,
+            client,
+            polling_rate,
+            strategy: Box::new(strategy),
         };
         Ok((required_segment, SegmentStatusGetter { reciever }))
     }
@@ -110,43 +152,49 @@ impl Segment {
             total: Some(self.data.end - self.data.start + 1),
             downloaded: 0,
         });
-        let mut res = self.client.get(&self.data.url).send().await?;
-        println!("I am here 0");
-        if res.status() != reqwest::StatusCode::OK {
-            return Err(DownloadRunError::ServerNotAvailable);
-        }
-        println!("I am here 1");
-        println!("Current filepath {}", &self.data.filepath);
-        let mut file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&self.data.filepath)
+        let mut res = self
+            .strategy
+            .run(self.client.clone(), &self.data.url)
             .await?;
-        //No need to seek. Each chunk is it's own file
-        let mut downloaded: u64 = 0;
-        let mut polling_interval = tokio::time::interval(Duration::from_millis(self.polling_rate));
-        println!("I am here 2");
-        loop {
-            tokio::select! {
-                next_chunk_maybe_err = res.chunk() => {
-                    let next_chunk_maybe = next_chunk_maybe_err?;
-                    if next_chunk_maybe.is_none() {
-                        break;
+        println!("I am here 0");
+        if let reqwest::StatusCode::PARTIAL_CONTENT = res.status() {
+            println!("I am here 1");
+            println!(
+                "Current filepath {}",
+                &self.data.filepath.to_string_lossy().to_string()
+            );
+            let mut file = self
+                .strategy
+                .get_file(&self.data.filepath)
+                .await
+                .map_err(|_| DownloadRunError::FileOpenError)?;
+            let mut downloaded: u64 = 0;
+            let mut polling_interval =
+                tokio::time::interval(Duration::from_millis(self.polling_rate));
+            println!("I am here 2");
+            loop {
+                tokio::select! {
+                    next_chunk_maybe_err = res.chunk() => {
+                        let next_chunk_maybe = next_chunk_maybe_err?;
+                        if next_chunk_maybe.is_none() {
+                            break;
+                        }
+                        let next_chunk = next_chunk_maybe.unwrap();
+                        let chunk_size = next_chunk.len() as u64;
+                        downloaded += chunk_size;
+                        file.write_all(&next_chunk)
+                            .await
+                            .map_err(|_| DownloadRunError::FileOpenError)?;
+                    },
+                    _ = polling_interval.tick() => {
+                        let _ = self.sender.send(DownloadStatus::Running { total: Some(self.length()), downloaded });
                     }
-                    let next_chunk = next_chunk_maybe.unwrap();
-                    let chunk_size = next_chunk.len() as u64;
-                    downloaded += chunk_size;
-                    file.write_all(&next_chunk)
-                        .await
-                        .map_err(|_| DownloadRunError::FileOpenError)?;
-                },
-                _ = polling_interval.tick() => {
-                    let _ = self.sender.send(DownloadStatus::Running { total: Some(self.length()), downloaded });
                 }
             }
+            let _ = self.sender.send(DownloadStatus::Completed);
+        } else {
+            return Err(DownloadRunError::ServerNotAvailable);
         }
-        let _ = self.sender.send(DownloadStatus::Completed);
         Ok(())
     }
 }
