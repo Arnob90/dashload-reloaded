@@ -15,20 +15,8 @@ export const DownloadRunErrorSchema = z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("AlreadyRunning") }),
 ]);
 
-/** Outer enum: DownloadStatusCheckError */
-export const DownloadStatusCheckErrorSchema = z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("DroppedDownloadError") }),
-    z.object({
-        kind: z.literal("DownloadRunError"),
-        payload: DownloadRunErrorSchema,
-    }),
-]);
-
 /** TypeScript types inferred automatically */
 export type DownloadRunError = z.infer<typeof DownloadRunErrorSchema>;
-export type DownloadStatusCheckError = z.infer<
-    typeof DownloadStatusCheckErrorSchema
->;
 
 export function get_error_message_from_run_error(error: DownloadRunError) {
     switch (error.kind) {
@@ -59,25 +47,8 @@ export function get_error_message_from_run_error(error: DownloadRunError) {
     }
 }
 
-export function get_error_message_from_status_error(
-    error: DownloadStatusCheckError
-): string {
-    switch (error.kind) {
-        case "DroppedDownloadError":
-            return "The download was dropped and cannot be checked.";
-
-        case "DownloadRunError": {
-            const inner = error.payload;
-            return get_error_message_from_run_error(inner);
-        }
-
-        default:
-            return "Unknown download status check error.";
-    }
-}
 
 export const DownloadStatusSchema = z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("Pending") }),
     z.object({ kind: z.literal("Stopped") }),
     z.object({
         kind: z.literal("Running"),
@@ -93,6 +64,9 @@ export const DownloadStatusSchema = z.discriminatedUnion("kind", [
     z.object({
         kind: z.literal("Failed"),
         payload: DownloadRunErrorSchema,
+    }),
+    z.object({
+        kind: z.literal("Paused"),
     }),
 ]);
 export const IDownloadDataSchema = z.object({
@@ -147,6 +121,20 @@ export type SegmentItemDownloadItemCreationError = z.infer<
 >;
 
 
+export const DownloadStatusGetErrorSchema = z.discriminatedUnion("kind", [
+    z.object({
+        kind: z.literal("StatusCheckError"),
+        payload: z.string()
+    }),
+    z.object({
+        kind: z.literal("IdDoesNotExist"),
+        payload: z.string()
+    })
+])
+
+export type DownloadStatusGetError = z.infer<typeof DownloadStatusGetErrorSchema>
+
+
 export const DownloadInfoSchema = z.object({
     url: z.string(),
     filename: z.string().nullable(),
@@ -171,17 +159,43 @@ export const NormalDownloadItemCreationErrorSchema = z.discriminatedUnion("kind"
     })
 ])
 export type NormalDownloadItemCreationError = z.infer<typeof NormalDownloadItemCreationErrorSchema>
-export const SmartDownloadItemCreationErrorSchema = z.discriminatedUnion("kind", [
-    z.object({
-        kind: z.literal("Normal"),
-        payload: NormalDownloadItemCreationErrorSchema
-    }),
-    z.object({
-        kind: z.literal("Segment"),
-        payload: SegmentItemDownloadItemCreationErrorSchema
-    })
-])
-export type SmartDownloadItemCreationError = z.infer<typeof SmartDownloadItemCreationErrorSchema>
 export type DownloadInfoGetError = z.infer<typeof DownloadInfoGetErrorSchema>
 export const DownloadInfoGetResultSchema = z.union([DownloadInfoSchema, DownloadInfoGetErrorSchema])
 export type DownloadInfoGetResult = z.infer<typeof DownloadInfoGetResultSchema>
+export const ResumeErrorSchema = z.discriminatedUnion("kind", [
+    z.object({
+        kind: z.literal("IdDoesNotExist"),
+        payload: z.string()
+    }),
+    z.object({
+        kind: z.literal("AlreadyRunning"),
+        payload: z.string()
+    }),
+    z.object({
+        kind: z.literal("NormalDownloadCreationError"),
+        payload: NormalDownloadItemCreationErrorSchema
+    }),
+    z.object({
+        kind: z.literal("SegmentedDownloadItemCreationError"),
+        payload: SegmentItemDownloadItemCreationErrorSchema
+    }),
+    z.object({
+        kind: z.literal("MiscError"),
+        payload: z.string()
+    })
+])
+export type ResumeError = z.infer<typeof ResumeErrorSchema>
+
+export const PauseErrorSchema = z.discriminatedUnion("kind", [
+    z.object({
+        kind: z.literal("IdDoesNotExist"),
+        payload: z.string()
+    }),
+    z.object({
+        kind: z.literal("NotRunningError"),
+        payload: z.string()
+    }),
+])
+export type PauseError = z.infer<typeof PauseErrorSchema>
+
+

@@ -1,6 +1,7 @@
 use crate::normal_download_strategies;
 use crate::segmented_verifier::{SegmentVerificationError, verify_segmented};
 use crate::statuses::DownloadStatus;
+use log::info;
 use reqwest::{self, Client};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -102,9 +103,13 @@ impl Segment {
         .await?;
         let strategy = normal_download_strategies::ResumedDownloadStrategy {
             start_offset: given_data.start,
+            segment_start_offset: given_data.start,
             end: Some(given_data.end),
         };
-        let (sender, reciever) = watch::channel(DownloadStatus::Pending);
+        let (sender, reciever) = watch::channel(DownloadStatus::Running {
+            total: None,
+            downloaded: 0,
+        });
         let required_segment = Segment {
             data: given_data,
             sender,
@@ -129,12 +134,21 @@ impl Segment {
         let file = fs::metadata(&given_data.filepath)
             .await
             .map_err(|_| SegmentVerificationError::NoMetadataFile)?;
+        println!(
+            "DEBUG: Resuming segment. Path: {:?}. Metadata: {:?}",
+            given_data.filepath, file
+        );
         let len = file.len();
+        let global_offset = given_data.start + len;
         let strategy = normal_download_strategies::ResumedDownloadStrategy {
-            start_offset: len,
+            start_offset: global_offset,
+            segment_start_offset: given_data.start,
             end: Some(given_data.end),
         };
-        let (sender, reciever) = watch::channel(DownloadStatus::Pending);
+        let (sender, reciever) = watch::channel(DownloadStatus::Running {
+            total: None,
+            downloaded: 0,
+        });
         let required_segment = Segment {
             data: given_data,
             sender,
@@ -150,7 +164,7 @@ impl Segment {
     pub async fn start(&self) -> Result<(), DownloadRunError> {
         let _ = self.sender.send(DownloadStatus::Running {
             total: Some(self.data.end - self.data.start + 1),
-            downloaded: 0,
+            downloaded: self.strategy.get_start() - self.data.start,
         });
         let mut res = self
             .strategy
@@ -159,20 +173,19 @@ impl Segment {
         println!("I am here 0");
         if let reqwest::StatusCode::PARTIAL_CONTENT = res.status() {
             println!("I am here 1");
-            println!(
+            info!(
                 "Current filepath {}",
                 &self.data.filepath.to_string_lossy().to_string()
             );
-            let mut file = self
-                .strategy
-                .get_file(&self.data.filepath)
-                .await
-                .map_err(|_| DownloadRunError::FileOpenError)?;
-            let mut downloaded: u64 = 0;
+            let mut file = self.strategy.get_file(&self.data.filepath).await.unwrap();
+            let mut downloaded: u64 = self.strategy.get_start() - self.data.start;
             let mut polling_interval =
                 tokio::time::interval(Duration::from_millis(self.polling_rate));
             println!("I am here 2");
             loop {
+                if let DownloadStatus::Paused = *self.sender.borrow() {
+                    return Ok(());
+                }
                 tokio::select! {
                     next_chunk_maybe_err = res.chunk() => {
                         let next_chunk_maybe = next_chunk_maybe_err?;
@@ -196,6 +209,9 @@ impl Segment {
             return Err(DownloadRunError::ServerNotAvailable);
         }
         Ok(())
+    }
+    pub fn pause(&self) {
+        let _ = self.sender.send(DownloadStatus::Paused);
     }
 }
 

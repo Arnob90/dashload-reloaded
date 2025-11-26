@@ -5,7 +5,7 @@ pub struct SegmentData {
     pub end: u64,
 }
 
-#[derive(Error, Debug, Serialize)]
+#[derive(Error, Debug, Serialize, Clone)]
 pub enum MakingSegmentError {
     #[error(
         "Cannot segment when the length is less than number of segments. \nLength: {0}\nNumber_of_segments: {1}"

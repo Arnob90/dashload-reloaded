@@ -1,6 +1,6 @@
 use serde::Serialize;
 use thiserror::Error;
-#[derive(Error, Debug, Serialize)]
+#[derive(Error, Debug, Serialize, Clone)]
 #[serde(tag = "kind", content = "payload")]
 pub enum LengthGettingErrors {
     #[error("Request failed!")]

@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react"
 import { GetStatusFullResult } from "../../code/typesOfBackend.ts"
 import { List } from "immutable"
-import { Table, Text } from "@mantine/core"
+import { ActionIcon, Table, Text } from "@mantine/core"
 import { bytesToMIB } from "../../code/utils.ts"
 import { createColumnHelper, getCoreRowModel, useReactTable, flexRender } from "@tanstack/react-table"
 import style from "./downloadtable.module.css"
 import { SelectableItemsTable } from "../selectabletable/selectableItemsTable.tsx"
+import { pause, resume } from "../../code/download.ts"
+import { notifications } from "@mantine/notifications"
+import { ChevronRight, Pause, PauseIcon } from "lucide-react"
 export type StatusFullResultValue = GetStatusFullResult[keyof GetStatusFullResult]
 export type StatusViewWithoutId = {
     filename: string,
@@ -72,7 +75,54 @@ export function DownloadTable({ toRender }: DownloadTableProps) {
     const requiredArr = useMemo(() => convertStatusDictToView(toRender).toArray(), [toRender])
     const [selectedId, setSelectedId] = useState<string | null>("")
     const columnHelper = createColumnHelper<StatusView>()
+    const handlePause = async (id: string) => {
+        const err_maybe = await pause(id)
+        if (err_maybe === undefined) {
+            return
+        }
+        notifications.show({
+            title: "Failed to Pause",
+            message: err_maybe.payload
+        })
+    }
+    const handleResume = async (id: string) => {
+        const err_maybe = await resume(id)
+        if (err_maybe === undefined) {
+            return
+        }
+        const err_thing = err_maybe.payload;
+        if (typeof err_thing === "string") {
+            notifications.show({
+                title: "Failed to Pause",
+                message: err_thing
+            })
+        }
+        else {
+            const message = err_thing.payload;
+            notifications.show({
+                title: "Failed to Resume",
+                message
+            })
+        }
+    }
     const columns = [
+        columnHelper.display({
+            id: "actions",
+            header: "",
+            cell: (info) => {
+                const status = info.row.original.status;
+                if (status === "Paused") {
+                    return <ActionIcon variant="subtle" onClick={() => handleResume(info.row.original.id)}>
+                        <ChevronRight></ChevronRight>
+                    </ActionIcon>
+                }
+                return (
+                    <ActionIcon variant="subtle" onClick={() => handlePause(info.row.original.id)}>
+                        <Pause></Pause>
+                    </ActionIcon>
+                )
+            }
+        }),
         columnHelper.accessor("filename", {
             header: "Filename",
             cell: (info) => info.getValue(),

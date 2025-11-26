@@ -9,11 +9,11 @@ use tokio::io::AsyncSeekExt;
 #[derive(Error, Debug)]
 pub enum GetFileError {
     #[error("Cannot create the file!")]
-    FileCreationError,
+    Creation,
     #[error("Failed to lock file")]
-    FileLockError,
+    Lock,
     #[error("Seek file error")]
-    FileSeekError,
+    Seek,
 }
 #[async_trait]
 pub trait DownloadStrategy: Send + Sync {
@@ -40,15 +40,15 @@ impl DownloadStrategy for FullDownloadStrategy {
                 .create(true)
                 .truncate(true)
                 .open(filepath_clone)
-                .map_err(|_| GetFileError::FileCreationError)?;
+                .map_err(|_| GetFileError::Creation)?;
             let block = file.try_lock_exclusive();
             match block {
                 Ok(_) => Ok(tokio::fs::File::from_std(file)),
-                Err(_) => Err(GetFileError::FileLockError),
+                Err(_) => Err(GetFileError::Lock),
             }
         })
         .await
-        .map_err(|_| GetFileError::FileLockError)??;
+        .map_err(|_| GetFileError::Lock)??;
         Ok(file)
     }
     fn get_start(&self) -> u64 {
@@ -59,6 +59,7 @@ impl DownloadStrategy for FullDownloadStrategy {
 pub struct ResumedDownloadStrategy {
     pub start_offset: u64,
     pub end: Option<u64>,
+    pub segment_start_offset: u64,
 }
 
 #[async_trait]
@@ -84,20 +85,24 @@ impl DownloadStrategy for ResumedDownloadStrategy {
         let filepath_clone = filepath.to_path_buf();
         let mut file = tokio::task::spawn_blocking(move || {
             let file = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
                 .write(true)
                 .open(filepath_clone)
-                .map_err(|_| GetFileError::FileCreationError)?;
+                .map_err(|_| GetFileError::Creation)?;
             let block = file.try_lock_exclusive();
             match block {
                 Ok(_) => Ok(tokio::fs::File::from_std(file)),
-                Err(_) => Err(GetFileError::FileLockError),
+                Err(_) => Err(GetFileError::Lock),
             }
         })
         .await
-        .map_err(|_| GetFileError::FileLockError)??;
-        file.seek(std::io::SeekFrom::Start(self.get_start()))
-            .await
-            .map_err(|_| GetFileError::FileSeekError)?;
+        .map_err(|_| GetFileError::Lock)??;
+        file.seek(std::io::SeekFrom::Start(
+            self.get_start() - self.segment_start_offset,
+        ))
+        .await
+        .map_err(|_| GetFileError::Seek)?;
         Ok(file)
     }
 }

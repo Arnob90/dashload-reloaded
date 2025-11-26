@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 pub mod download_data;
 pub mod download_manager;
+pub mod downloaditem;
 pub mod filename_getter;
 pub mod get_download_info;
 pub mod idownloaditem;
@@ -10,8 +11,10 @@ pub mod message_pass;
 pub mod misc;
 pub mod normal_download_item;
 mod normal_download_strategies;
+pub mod resume_download_factory;
 pub mod segment;
 pub mod segmented_download_item;
 pub mod segmented_verifier;
 mod segmenter;
 pub mod statuses;
+pub mod terminal_download_item;

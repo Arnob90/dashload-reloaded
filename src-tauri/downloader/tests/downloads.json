@@ -1,0 +1,31 @@
+{
+  "url": "https://mirror.xeonbd.com/linuxmint.com/stable/22.2/linuxmint-22.2-xfce-64bit.iso",
+  "filepath": "/home/arnob/Programming/dashload-reloaded/src-tauri/downloader/tests/downloads",
+  "segments": [
+    {
+      "start": 0,
+      "end": 754974719,
+      "url": "https://mirror.xeonbd.com/linuxmint.com/stable/22.2/linuxmint-22.2-xfce-64bit.iso",
+      "filepath": "/home/arnob/Programming/dashload-reloaded/src-tauri/downloader/tests/downloads.0"
+    },
+    {
+      "start": 754974720,
+      "end": 1509949439,
+      "url": "https://mirror.xeonbd.com/linuxmint.com/stable/22.2/linuxmint-22.2-xfce-64bit.iso",
+      "filepath": "/home/arnob/Programming/dashload-reloaded/src-tauri/downloader/tests/downloads.1"
+    },
+    {
+      "start": 1509949440,
+      "end": 2264924159,
+      "url": "https://mirror.xeonbd.com/linuxmint.com/stable/22.2/linuxmint-22.2-xfce-64bit.iso",
+      "filepath": "/home/arnob/Programming/dashload-reloaded/src-tauri/downloader/tests/downloads.2"
+    },
+    {
+      "start": 2264924160,
+      "end": 3019898879,
+      "url": "https://mirror.xeonbd.com/linuxmint.com/stable/22.2/linuxmint-22.2-xfce-64bit.iso",
+      "filepath": "/home/arnob/Programming/dashload-reloaded/src-tauri/downloader/tests/downloads.3"
+    }
+  ],
+  "length": 3019898880
+}

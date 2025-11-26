@@ -1,8 +1,9 @@
+use downloader::download_manager::DownloadStatusGetError;
+use downloader::download_manager::PauseError;
+use downloader::download_manager::ResumeError;
 use downloader::idownloaditem::IDownloadData;
-use downloader::segment::DownloadStatusCheckError;
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use downloader::download_manager::DownloadManager;
-use downloader::download_manager::SmartDownloadItemError;
 use downloader::filename_getter;
 use downloader::get_download_info::get_download_info;
 use downloader::get_download_info::DownloadInfo;
@@ -14,11 +15,10 @@ use std::path::Path;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
-use tokio::sync::Mutex;
 
 struct AppState {
     client: reqwest::Client,
-    download_manager: Mutex<DownloadManager>,
+    download_manager: DownloadManager,
 }
 
 impl AppState {
@@ -26,7 +26,7 @@ impl AppState {
         let client = reqwest::Client::new();
         Self {
             client: client.clone(),
-            download_manager: Mutex::new(DownloadManager::new(client.clone(), 300)),
+            download_manager: DownloadManager::new(client.clone(), 300),
         }
     }
 }
@@ -42,9 +42,9 @@ async fn start_download_normal(
     given_url: &str,
     filepath: &str,
 ) -> Result<(), NormalDownloadItemCreationError> {
-    let mut manager = state.download_manager.lock().await;
+    let manager = &state.download_manager;
     manager
-        .add_download_normal(given_url.to_string(), filepath.to_string())
+        .add_download_normal(given_url.to_string(), filepath.into())
         .await?;
     Ok(())
 }
@@ -56,26 +56,9 @@ async fn start_download_segmented(
     filepath: &str,
     number_of_segments: u64,
 ) -> Result<(), SegmentedDownloadItemCreationError> {
-    let mut manager = state.download_manager.lock().await;
+    let manager = &state.download_manager;
     manager
-        .add_download_segmented(
-            given_url.to_string(),
-            filepath.to_string(),
-            number_of_segments,
-        )
-        .await?;
-    Ok(())
-}
-
-#[tauri::command]
-async fn start_download_smart(
-    state: State<'_, AppState>,
-    given_url: &str,
-    filepath: &str,
-) -> Result<(), SmartDownloadItemError> {
-    let mut manager = state.download_manager.lock().await;
-    manager
-        .add_download_smart(given_url.to_string(), filepath.to_string())
+        .add_download_segmented(given_url.to_string(), filepath.into(), number_of_segments)
         .await?;
     Ok(())
 }
@@ -96,8 +79,8 @@ async fn open_file(app: AppHandle) -> Result<Option<String>, String> {
 #[tauri::command]
 async fn get_status(
     state: State<'_, AppState>,
-) -> Result<HashMap<String, IDownloadData>, DownloadStatusCheckError> {
-    let manager = state.download_manager.lock().await;
+) -> Result<HashMap<String, IDownloadData>, DownloadStatusGetError> {
+    let manager = &state.download_manager;
     let status = manager.get_all_items().await?;
     Ok(status)
 }
@@ -125,6 +108,18 @@ async fn join_paths(first_segment: String, second_segment: String) -> String {
     joined_path.to_string_lossy().to_string()
 }
 
+#[tauri::command]
+async fn pause(state: State<'_, AppState>, id: &str) -> Result<(), PauseError> {
+    let manager = &state.download_manager;
+    manager.pause(id).await
+}
+
+#[tauri::command]
+async fn resume(state: State<'_, AppState>, id: &str) -> Result<(), ResumeError> {
+    let manager = &state.download_manager;
+    manager.resume(id).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -140,10 +135,11 @@ pub fn run() {
             open_file,
             get_status,
             start_download_segmented,
-            start_download_smart,
             get_download_metadata,
             get_filename,
-            join_paths
+            join_paths,
+            pause,
+            resume
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,7 +3,8 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::length_getter;
-#[derive(Error, Debug, Serialize)]
+#[derive(Error, Debug, Serialize, Clone)]
+#[serde(tag = "kind", content = "payload")]
 pub enum SegmentVerificationError {
     #[error("Request failed!")]
     RequestError(String),
