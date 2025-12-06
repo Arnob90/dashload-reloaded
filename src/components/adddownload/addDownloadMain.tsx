@@ -1,6 +1,6 @@
 import { AddDownloadUrl } from "./addDownloadUrl";
 import { useState } from "react";
-import { DownloadInfo } from "../../code/typesOfBackend";
+import { DownloadInfo, getErrorMessageFromError } from "../../code/typesOfBackend";
 import { RunDownloadDialog } from "./runDownload";
 import { getDownloadInfo } from "../../code/getDownloadInfo";
 import { notifications } from "@mantine/notifications";
@@ -19,9 +19,10 @@ export function AddDownload({ open, onOpenStateChangeRequested }: AddDownloadPro
         if ("kind" in info) {
             console.log(info.kind)
             notifications.show({
-                message: info.payload,
+                message: getErrorMessageFromError(info),
                 title: "Error",
             })
+            setLoading(false)
         }
         else {
             setMetadata(info)

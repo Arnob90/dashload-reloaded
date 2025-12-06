@@ -6,7 +6,6 @@ use thiserror::Error;
 
 use crate::{
     download_data::DownloadData, idownloaditem::IRunningDownloadItem,
-    normal_download_item::NormalDownloadItemCreationError,
     segmented_download_item::SegmentedDownloadItemCreationError,
 };
 
@@ -16,12 +15,10 @@ pub struct DownloadResumeFactory {}
 pub enum ResumeFactoryErr {
     #[error("Metadata file cannot be opened or does not exist")]
     MetadataFileError,
-    #[error("Metadata cannot be serialized")]
-    MetadataSerializationError,
+    #[error("Metadata cannot be deserialized")]
+    MetadataDeserializationError,
     #[error("Segmented download cannot be created")]
     SegmentedDownloadCreationError(SegmentedDownloadItemCreationError),
-    #[error("Normal download cannot be created")]
-    NormalDownloadCreationError(NormalDownloadItemCreationError),
 }
 impl DownloadResumeFactory {
     pub async fn resume_from_filepath(
@@ -40,29 +37,16 @@ impl DownloadResumeFactory {
             .await
             .map_err(|_| ResumeFactoryErr::MetadataFileError)?;
         let metadata_read: DownloadData = serde_json::from_str(&metadata_text)
-            .map_err(|_| ResumeFactoryErr::MetadataSerializationError)?;
+            .map_err(|_| ResumeFactoryErr::MetadataDeserializationError)?;
         let required_filepath = Path::new(&metadata_read.filepath);
-        let segmented = metadata_read.segments;
-        if segmented.is_some() {
-            let download_item =
-                crate::segmented_download_item::SegmentedRunningDownloadItem::create_with_resume(
-                    client.clone(),
-                    required_filepath.to_path_buf(),
-                    polling_rate_ms,
-                )
-                .await
-                .map_err(ResumeFactoryErr::SegmentedDownloadCreationError)?;
-            Ok(download_item)
-        } else {
-            let download_item =
-                crate::normal_download_item::NormalRunningDownloadItem::create_with_resume(
-                    required_filepath.to_path_buf(),
-                    client.clone(),
-                    polling_rate_ms,
-                )
-                .await
-                .map_err(ResumeFactoryErr::NormalDownloadCreationError)?;
-            Ok(download_item)
-        }
+        let download_item =
+            crate::segmented_download_item::SegmentedRunningDownloadItem::create_with_resume(
+                client.clone(),
+                required_filepath.to_path_buf(),
+                polling_rate_ms,
+            )
+            .await
+            .map_err(ResumeFactoryErr::SegmentedDownloadCreationError)?;
+        Ok(download_item)
     }
 }

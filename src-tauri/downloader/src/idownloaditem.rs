@@ -7,7 +7,14 @@ use crate::{
 };
 use async_trait::async_trait;
 use serde::Serialize;
+use thiserror::Error;
 
+#[derive(Error, Debug, Serialize)]
+#[serde(tag = "kind", content = "payload")]
+pub enum DeleteFileError {
+    #[error("Failed to delete file. Reason: {0}")]
+    IoError(String),
+}
 #[async_trait]
 pub trait IRunningDownloadItem: Send + Sync + Any {
     fn get_status(&self) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError>;
@@ -18,6 +25,7 @@ pub trait IRunningDownloadItem: Send + Sync + Any {
     fn pause(&self);
     fn get_status_reciever(&self) -> tokio::sync::watch::Receiver<statuses::DownloadStatus>;
     fn get_download_data(&self) -> DownloadData;
+    async fn cancel(&self) -> Result<(), DeleteFileError>;
 }
 
 #[derive(Serialize, Clone, PartialEq)]
@@ -31,7 +39,9 @@ pub enum RichDownloadStatus {
         eta_secs: Option<f64>,
     },
     Failed(DownloadRunError),
-    Completed,
+    Completed {
+        total: u64,
+    },
     Stopped,
     Paused,
 }

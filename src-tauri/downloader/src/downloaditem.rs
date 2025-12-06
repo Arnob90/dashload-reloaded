@@ -38,7 +38,9 @@ impl DownloadItem {
             // TODO: Add stop when done
             if matches!(
                 status,
-                DownloadStatus::Completed | DownloadStatus::Paused | DownloadStatus::Failed(_)
+                DownloadStatus::Completed { total: _ }
+                    | DownloadStatus::Paused
+                    | DownloadStatus::Failed(_)
             ) {
                 let mut handle = self.handle.write().await;
 

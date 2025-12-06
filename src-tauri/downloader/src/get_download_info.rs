@@ -41,7 +41,8 @@ pub async fn get_download_info(
     //Check if at least a single segment is possible with accept ranges
     let mut segmented_possible = false;
     if let Some(length) = length_maybe {
-        let check = segmented_verifier::verify_segmented(client.clone(), url, 0, length - 1).await;
+        let check =
+            segmented_verifier::verify_segmented(client.clone(), url, 0, Some(length - 1)).await;
         if check.is_ok() {
             segmented_possible = true;
         }

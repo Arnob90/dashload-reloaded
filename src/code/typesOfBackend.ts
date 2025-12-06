@@ -152,13 +152,16 @@ export const DownloadInfoGetErrorSchema = z.discriminatedUnion("kind", [
         payload: z.string()
     })
 ])
-export const NormalDownloadItemCreationErrorSchema = z.discriminatedUnion("kind", [
+export const ResumeFactoryErrorSchema = z.discriminatedUnion("kind", [
     z.object({
-        kind: z.literal("DirectoryGivenError"),
-        payload: z.string(),
+        kind: z.literal("MetadataFileError"),
+        payload: z.string()
+    }),
+    z.object({
+        kind: z.literal("MetadataDeserializationError"),
+        payload: z.string()
     })
 ])
-export type NormalDownloadItemCreationError = z.infer<typeof NormalDownloadItemCreationErrorSchema>
 export type DownloadInfoGetError = z.infer<typeof DownloadInfoGetErrorSchema>
 export const DownloadInfoGetResultSchema = z.union([DownloadInfoSchema, DownloadInfoGetErrorSchema])
 export type DownloadInfoGetResult = z.infer<typeof DownloadInfoGetResultSchema>
@@ -168,20 +171,16 @@ export const ResumeErrorSchema = z.discriminatedUnion("kind", [
         payload: z.string()
     }),
     z.object({
-        kind: z.literal("AlreadyRunning"),
+        kind: z.literal("NotPausedError"),
         payload: z.string()
-    }),
-    z.object({
-        kind: z.literal("NormalDownloadCreationError"),
-        payload: NormalDownloadItemCreationErrorSchema
-    }),
-    z.object({
-        kind: z.literal("SegmentedDownloadItemCreationError"),
-        payload: SegmentItemDownloadItemCreationErrorSchema
     }),
     z.object({
         kind: z.literal("MiscError"),
         payload: z.string()
+    }),
+    z.object({
+        kind: z.literal("DownloadItemCreationError"),
+        payload: ResumeFactoryErrorSchema
     })
 ])
 export type ResumeError = z.infer<typeof ResumeErrorSchema>
@@ -198,4 +197,14 @@ export const PauseErrorSchema = z.discriminatedUnion("kind", [
 ])
 export type PauseError = z.infer<typeof PauseErrorSchema>
 
+export interface IError {
+    payload: string | IError,
+    kind: string,
+}
 
+export function getErrorMessageFromError(givenObj: IError): string {
+    if (typeof givenObj.payload === "string") {
+        return givenObj.payload
+    }
+    return getErrorMessageFromError(givenObj.payload)
+}

@@ -4,6 +4,6 @@ use serde::{Deserialize, Serialize};
 pub struct DownloadData {
     pub url: String,
     pub filepath: String,
-    pub segments: Option<Vec<SegmentData>>,
+    pub segments: Vec<SegmentData>,
     pub length: Option<u64>,
 }

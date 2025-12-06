@@ -1,12 +1,16 @@
 use crate::segment::DownloadRunError;
+use crate::segmented_verifier::SegmentVerificationError;
 use async_trait::async_trait;
 use fs2::FileExt;
 use reqwest::{Response, StatusCode};
+use serde::Serialize;
 use std::path::Path;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Serialize, Clone, PartialEq)]
+#[serde(tag = "kind", content = "payload")]
 pub enum GetFileError {
     #[error("Cannot create the file!")]
     Creation,
@@ -14,6 +18,8 @@ pub enum GetFileError {
     Lock,
     #[error("Seek file error")]
     Seek,
+    #[error("Locking file took too long")]
+    FileLockingTimeout,
 }
 #[async_trait]
 pub trait DownloadStrategy: Send + Sync {
@@ -34,20 +40,24 @@ impl DownloadStrategy for FullDownloadStrategy {
     }
     async fn get_file(&self, filepath: &Path) -> Result<File, GetFileError> {
         let filepath_clone = filepath.to_path_buf();
-        let file = tokio::task::spawn_blocking(move || {
-            let file = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(filepath_clone)
-                .map_err(|_| GetFileError::Creation)?;
-            let block = file.try_lock_exclusive();
-            match block {
-                Ok(_) => Ok(tokio::fs::File::from_std(file)),
-                Err(_) => Err(GetFileError::Lock),
-            }
-        })
+        let file = tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::task::spawn_blocking(move || {
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(filepath_clone)
+                    .map_err(|_| GetFileError::Creation)?;
+                let block: Result<(), std::io::Error> = file.lock_exclusive();
+                match block {
+                    Ok(_) => Ok(tokio::fs::File::from_std(file)),
+                    Err(_) => Err(GetFileError::Lock),
+                }
+            }),
+        )
         .await
+        .map_err(|_| GetFileError::FileLockingTimeout)?
         .map_err(|_| GetFileError::Lock)??;
         Ok(file)
     }
@@ -60,6 +70,7 @@ pub struct ResumedDownloadStrategy {
     pub start_offset: u64,
     pub end: Option<u64>,
     pub segment_start_offset: u64,
+    pub truncate_on_start: bool,
 }
 
 #[async_trait]
@@ -75,7 +86,9 @@ impl DownloadStrategy for ResumedDownloadStrategy {
         let res = client.get(url).header("Range", range_header).send().await?;
         match res.status() {
             StatusCode::PARTIAL_CONTENT => Ok(res),
-            _ => Err(DownloadRunError::ServerNotRangable),
+            _ => Err(DownloadRunError::SegmentVerificationError(
+                SegmentVerificationError::ServerNotRangable,
+            )),
         }
     }
     fn get_start(&self) -> u64 {
@@ -83,20 +96,25 @@ impl DownloadStrategy for ResumedDownloadStrategy {
     }
     async fn get_file(&self, filepath: &Path) -> Result<File, GetFileError> {
         let filepath_clone = filepath.to_path_buf();
-        let mut file = tokio::task::spawn_blocking(move || {
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(true)
-                .write(true)
-                .open(filepath_clone)
-                .map_err(|_| GetFileError::Creation)?;
-            let block = file.try_lock_exclusive();
-            match block {
-                Ok(_) => Ok(tokio::fs::File::from_std(file)),
-                Err(_) => Err(GetFileError::Lock),
-            }
-        })
+        let truncate_on_start = self.truncate_on_start;
+        let mut file = tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::task::spawn_blocking(move || {
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(truncate_on_start)
+                    .open(filepath_clone)
+                    .map_err(|_| GetFileError::Creation)?;
+                let block: Result<(), std::io::Error> = file.lock_exclusive();
+                match block {
+                    Ok(_) => Ok(tokio::fs::File::from_std(file)),
+                    Err(_) => Err(GetFileError::Lock),
+                }
+            }),
+        )
         .await
+        .map_err(|_| GetFileError::FileLockingTimeout)?
         .map_err(|_| GetFileError::Lock)??;
         file.seek(std::io::SeekFrom::Start(
             self.get_start() - self.segment_start_offset,

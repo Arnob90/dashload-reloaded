@@ -5,8 +5,17 @@ use crate::segment::DownloadRunError;
 #[serde(tag = "kind", content = "payload")]
 pub enum DownloadStatus {
     Stopped,
-    Running { total: Option<u64>, downloaded: u64 },
-    Completed,
+    Running {
+        total: Option<u64>,
+        downloaded: u64,
+        download_speed: u64,
+    },
+    Completed {
+        total: u64,
+    },
     Failed(DownloadRunError),
-    Paused,
+    Paused {
+        downloaded: u64,
+        total: Option<u64>,
+    },
 }

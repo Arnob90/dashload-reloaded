@@ -8,7 +8,6 @@ use downloader::filename_getter;
 use downloader::get_download_info::get_download_info;
 use downloader::get_download_info::DownloadInfo;
 use downloader::get_download_info::DownloadInfoGetError;
-use downloader::normal_download_item::NormalDownloadItemCreationError;
 use downloader::segmented_download_item::SegmentedDownloadItemCreationError;
 use std::collections::HashMap;
 use std::path::Path;
@@ -26,7 +25,7 @@ impl AppState {
         let client = reqwest::Client::new();
         Self {
             client: client.clone(),
-            download_manager: DownloadManager::new(client.clone(), 300),
+            download_manager: DownloadManager::new(client.clone(), 100),
         }
     }
 }
@@ -34,19 +33,6 @@ impl AppState {
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-#[tauri::command]
-async fn start_download_normal(
-    state: State<'_, AppState>,
-    given_url: &str,
-    filepath: &str,
-) -> Result<(), NormalDownloadItemCreationError> {
-    let manager = &state.download_manager;
-    manager
-        .add_download_normal(given_url.to_string(), filepath.into())
-        .await?;
-    Ok(())
 }
 
 #[tauri::command]
@@ -131,7 +117,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             greet,
-            start_download_normal,
             open_file,
             get_status,
             start_download_segmented,

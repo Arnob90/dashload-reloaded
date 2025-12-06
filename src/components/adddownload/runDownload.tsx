@@ -1,11 +1,11 @@
 import { Modal, Box, TextInput, Flex, ActionIcon, Button, Text, LoadingOverlay, NumberInput } from "@mantine/core";
-import { DownloadInfo, NormalDownloadItemCreationError, SegmentItemDownloadItemCreationError } from "../../code/typesOfBackend";
+import { DownloadInfo, getErrorMessageFromError } from "../../code/typesOfBackend";
 import { useState } from "react";
 import { Folder } from "lucide-react";
 import { CollapsibleSection } from "./extraOptions";
 import { chooseFolder } from "../../code/chooseFolder";
 import { joinPaths } from "../../code/joinPath.ts";
-import { startDownload, startDownloadSegmented } from "../../code/download.ts"
+import { useStartDownloadSegmented } from "../../code/download.ts"
 import { notifications } from "@mantine/notifications";
 
 export interface RunDownloadDialogProps {
@@ -19,6 +19,7 @@ export function RunDownloadDialog({ metadata, open, onOpenStateChangeRequested }
     const [filename, setFilename] = useState(metadata.filename ?? "")
     const [loading, setLoading] = useState(false)
     const [numberOfSegments, setNumberOfSegments] = useState(metadata.segmented_possible ? 3 : 1)
+    const startDownloadSegmented = useStartDownloadSegmented()
     const chooseFolderByPrompt = async () => {
         const filepathChoosen = await chooseFolder()
         if (filepathChoosen === null) {
@@ -30,16 +31,10 @@ export function RunDownloadDialog({ metadata, open, onOpenStateChangeRequested }
         const combinedFilepath = await joinPaths(filepathToDownloadTo, filename)
         console.log(combinedFilepath)
         setLoading(true)
-        let res: NormalDownloadItemCreationError | SegmentItemDownloadItemCreationError | undefined = undefined
-        if (numberOfSegments === 1) {
-            res = await startDownload(metadata.url, combinedFilepath)
-        }
-        else {
-            res = await startDownloadSegmented(metadata.url, combinedFilepath, numberOfSegments)
-        }
+        const res = await startDownloadSegmented.mutateAsync({ url: metadata.url, filepath: combinedFilepath, numberOfSegments: numberOfSegments })
         if (res !== undefined) {
             notifications.show({
-                message: res.payload,
+                message: getErrorMessageFromError(res),
                 title: "Error",
             })
         }
@@ -63,7 +58,7 @@ export function RunDownloadDialog({ metadata, open, onOpenStateChangeRequested }
                             <Folder color="#9c9c9c" />
                         </ActionIcon>
                     </Flex>
-                    <Button type="submit">Start Download</Button>
+                    <Button type="submit" disabled={filepathToDownloadTo === "" || filename === ""}>Start Download</Button>
                     <CollapsibleSection optionText="Info">
                         <Flex bg={"dark"} direction={"column"}>
                             <Box m={"sm"}>

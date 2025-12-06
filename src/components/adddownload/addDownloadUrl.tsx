@@ -1,5 +1,5 @@
-import { Modal, Input, Text, Flex, LoadingOverlay, Box, Button } from "@mantine/core";
-import { DownloadInfoGetError, DownloadInfo } from "../../code/typesOfBackend";
+import { Modal, Input, Text, Flex, LoadingOverlay, Button } from "@mantine/core";
+import { DownloadInfoGetError } from "../../code/typesOfBackend";
 import { useState } from "react";
 export interface AddDownloadProps {
     open: boolean,

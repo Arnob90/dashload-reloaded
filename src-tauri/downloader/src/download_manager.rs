@@ -1,13 +1,11 @@
 use crate::downloaditem::{DownloadHandle, DownloadItem};
 use crate::idownloaditem::IDownloadData;
 use crate::misc::FutureVec;
-use crate::normal_download_item::NormalDownloadItemCreationError;
 use crate::resume_download_factory::{DownloadResumeFactory, ResumeFactoryErr};
 use crate::segment::DownloadStatusCheckError;
 use crate::statuses;
 use crate::{
     idownloaditem::RichDownloadStatus,
-    normal_download_item::NormalRunningDownloadItem,
     segmented_download_item::{SegmentedDownloadItemCreationError, SegmentedRunningDownloadItem},
 };
 use dashmap::DashMap;
@@ -85,20 +83,6 @@ impl DownloadManager {
         self.download_items.insert(uuid, required_download_item);
         Ok(())
     }
-    pub async fn add_download_normal(
-        &self,
-        url: String,
-        filepath: PathBuf,
-    ) -> Result<(), NormalDownloadItemCreationError> {
-        let required_download_item = DownloadItem::new(DownloadHandle::Running(
-            NormalRunningDownloadItem::new(url, filepath, self.client.clone(), self.poll_every_ms)
-                .await?,
-        ))
-        .await;
-        let uuid = Uuid::new_v4().as_simple().to_string();
-        self.download_items.insert(uuid, required_download_item);
-        Ok(())
-    }
     // Renamed to be more explicit about what it does.
     // We usually catch this in batch, so we might as well own the string
     pub async fn get_download_data_from_item(
@@ -118,7 +102,9 @@ impl DownloadManager {
                 statuses::DownloadStatus::Running { .. } => {
                     unreachable!("A terminal item is never running!")
                 }
-                statuses::DownloadStatus::Completed => RichDownloadStatus::Completed,
+                statuses::DownloadStatus::Completed { total } => {
+                    RichDownloadStatus::Completed { total: *total }
+                }
                 statuses::DownloadStatus::Failed(e) => RichDownloadStatus::Failed(e.clone()),
                 statuses::DownloadStatus::Stopped => RichDownloadStatus::Stopped,
                 statuses::DownloadStatus::Paused => RichDownloadStatus::Paused,
@@ -198,7 +184,9 @@ impl DownloadManager {
                         }),
                     }
                 }
-                statuses::DownloadStatus::Completed => RichDownloadStatus::Completed,
+                statuses::DownloadStatus::Completed { total } => {
+                    RichDownloadStatus::Completed { total }
+                }
                 statuses::DownloadStatus::Failed(e) => RichDownloadStatus::Failed(e),
                 statuses::DownloadStatus::Stopped => RichDownloadStatus::Stopped,
                 statuses::DownloadStatus::Paused => RichDownloadStatus::Paused,
@@ -237,7 +225,6 @@ impl DownloadManager {
         Ok(download_datas_map)
     }
     pub async fn resume(&self, item_id: &str) -> Result<(), ResumeError> {
-        self.status_history.remove(item_id);
         let to_resume = self.get_download_data_from_item(item_id.to_string()).await;
         if let Err(DownloadStatusGetError::IdDoesNotExist) = to_resume {
             return Err(ResumeError::IdDoesNotExist);
@@ -253,6 +240,7 @@ impl DownloadManager {
             )
             .await
             .map_err(ResumeError::DownloadItemCreationError)?;
+            self.status_history.remove(item_id);
             self.download_items.insert(
                 item_id.to_string(),
                 DownloadItem::new(DownloadHandle::Running(handle)).await,

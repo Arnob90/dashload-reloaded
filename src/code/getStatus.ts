@@ -15,7 +15,7 @@ export function useDownloadStatuses() {
         },
         //Default 300
         // TODO: Make this configurable in the future
-        refetchInterval: 300,
+        refetchInterval: 100,
         refetchIntervalInBackground: false,
     });
 }

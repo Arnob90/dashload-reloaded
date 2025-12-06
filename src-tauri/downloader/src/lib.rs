@@ -9,7 +9,6 @@ mod lazy;
 pub mod length_getter;
 pub mod message_pass;
 pub mod misc;
-pub mod normal_download_item;
 mod normal_download_strategies;
 pub mod resume_download_factory;
 pub mod segment;

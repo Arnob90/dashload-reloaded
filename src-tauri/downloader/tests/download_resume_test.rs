@@ -26,7 +26,6 @@ async fn test_download_resume() {
     download_manager.pause(&download_ids[0]).await.unwrap();
     tokio::time::sleep(Duration::from_millis(1000)).await;
     download_manager.resume(&download_ids[0]).await.unwrap();
-    //Dead lock here
     tokio::time::sleep(Duration::from_millis(1000)).await;
     for _ in 0..3 {
         let datas = download_manager.get_all_items().await;

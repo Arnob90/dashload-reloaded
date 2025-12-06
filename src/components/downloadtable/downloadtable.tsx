@@ -1,73 +1,13 @@
 import { useMemo, useState } from "react"
 import { GetStatusFullResult } from "../../code/typesOfBackend.ts"
-import { List } from "immutable"
-import { ActionIcon, Table, Text } from "@mantine/core"
 import { bytesToMIB } from "../../code/utils.ts"
 import { createColumnHelper, getCoreRowModel, useReactTable, flexRender } from "@tanstack/react-table"
 import style from "./downloadtable.module.css"
 import { SelectableItemsTable } from "../selectabletable/selectableItemsTable.tsx"
-import { pause, resume } from "../../code/download.ts"
-import { notifications } from "@mantine/notifications"
-import { ChevronRight, Pause, PauseIcon } from "lucide-react"
-export type StatusFullResultValue = GetStatusFullResult[keyof GetStatusFullResult]
-export type StatusViewWithoutId = {
-    filename: string,
-    status: string,
-    downloaded: number | null,
-    total: number | null,
-    downloadSpeed: number | null,
-    downloaded_portion: number | null,
-    eta_secs: number | null
-}
-export type StatusView = StatusViewWithoutId & {
-    id: string
-}
-
-function formatTime(seconds: number): string {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-
-    // Pad with leading zeros if needed
-    const paddedHrs = String(hrs).padStart(2, '0');
-    const paddedMins = String(mins).padStart(2, '0');
-    const paddedSecs = String(secs).padStart(2, '0');
-
-    return `${paddedHrs}:${paddedMins}:${paddedSecs}`;
-}
-function convertStatusToView(givenStatus: StatusFullResultValue): StatusViewWithoutId {
-    const filename = givenStatus.filename;
-    const status = givenStatus.status.kind;
-    if (status === "Running") {
-        return {
-            filename,
-            status,
-            downloadSpeed: givenStatus.status.payload.download_speed,
-            downloaded: givenStatus.status.payload.downloaded,
-            total: givenStatus.status.payload.total,
-            downloaded_portion: givenStatus.status.payload.downloaded_portion,
-            eta_secs: givenStatus.status.payload.eta_secs
-        }
-    }
-    return {
-        filename,
-        status,
-        downloadSpeed: null,
-        downloaded: null,
-        total: null,
-        downloaded_portion: null,
-        eta_secs: null
-    }
-}
-function convertStatusDictToView(givenStatus: GetStatusFullResult): List<StatusView> {
-    let requiredArr = List<StatusView>([])
-    for (const id in givenStatus) {
-        const result = givenStatus[id]
-        const view = convertStatusToView(result)
-        requiredArr = requiredArr.push({ ...view, id: id })
-    }
-    return requiredArr
-}
+import { convertStatusDictToView, StatusView } from "./statusView.tsx"
+import { formatTime } from "../../code/formatTime"
+import { ActionCell } from "./actioncell.tsx"
+import { Text, Table } from "@mantine/core"
 export interface DownloadTableProps {
     toRender: GetStatusFullResult
 }
@@ -75,53 +15,11 @@ export function DownloadTable({ toRender }: DownloadTableProps) {
     const requiredArr = useMemo(() => convertStatusDictToView(toRender).toArray(), [toRender])
     const [selectedId, setSelectedId] = useState<string | null>("")
     const columnHelper = createColumnHelper<StatusView>()
-    const handlePause = async (id: string) => {
-        const err_maybe = await pause(id)
-        if (err_maybe === undefined) {
-            return
-        }
-        notifications.show({
-            title: "Failed to Pause",
-            message: err_maybe.payload
-        })
-    }
-    const handleResume = async (id: string) => {
-        const err_maybe = await resume(id)
-        if (err_maybe === undefined) {
-            return
-        }
-        const err_thing = err_maybe.payload;
-        if (typeof err_thing === "string") {
-            notifications.show({
-                title: "Failed to Pause",
-                message: err_thing
-            })
-        }
-        else {
-            const message = err_thing.payload;
-            notifications.show({
-                title: "Failed to Resume",
-                message
-            })
-        }
-    }
-    const columns = [
+    const columns = useMemo(() => [
         columnHelper.display({
             id: "actions",
             header: "",
-            cell: (info) => {
-                const status = info.row.original.status;
-                if (status === "Paused") {
-                    return <ActionIcon variant="subtle" onClick={() => handleResume(info.row.original.id)}>
-                        <ChevronRight></ChevronRight>
-                    </ActionIcon>
-                }
-                return (
-                    <ActionIcon variant="subtle" onClick={() => handlePause(info.row.original.id)}>
-                        <Pause></Pause>
-                    </ActionIcon>
-                )
-            }
+            cell: (info) => <ActionCell givenView={info.row.original}></ActionCell>
         }),
         columnHelper.accessor("filename", {
             header: "Filename",
@@ -151,7 +49,7 @@ export function DownloadTable({ toRender }: DownloadTableProps) {
             header: "ETA",
             cell: (info) => <Text>{info.getValue() != null ? `${formatTime(info.getValue()!)}` : "-"}</Text>,
         })
-    ]
+    ], [])
     const tableModel = useReactTable({
         data: requiredArr,
         columns: columns,

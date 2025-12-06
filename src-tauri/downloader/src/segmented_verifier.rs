@@ -3,7 +3,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::length_getter;
-#[derive(Error, Debug, Serialize, Clone)]
+#[derive(Error, Debug, Serialize, Clone, PartialEq)]
 #[serde(tag = "kind", content = "payload")]
 pub enum SegmentVerificationError {
     #[error("Request failed!")]
@@ -22,8 +22,6 @@ pub enum SegmentVerificationError {
     ServerFailure(u16),
     #[error("Cannot find metadata for resumption")]
     NoMetadataFile,
-    #[error("The given download is not segmented")]
-    NoSegments,
 }
 impl From<reqwest::Error> for SegmentVerificationError {
     fn from(err: reqwest::Error) -> Self {
@@ -35,7 +33,7 @@ pub async fn verify_segmented(
     client: reqwest::Client,
     url: &str,
     _begin: u64,
-    end: u64,
+    end_maybe: Option<u64>,
 ) -> Result<(), SegmentVerificationError> {
     // --- Metadata Check with HEAD ---
     let response = client.head(url).send().await?;
@@ -55,7 +53,9 @@ pub async fn verify_segmented(
     }
     let client_to_get_length = client.clone();
     let length_num: u64 = length_getter::get_length(client_to_get_length, url).await?;
-    if end >= length_num {
+    if let Some(end) = end_maybe
+        && end >= length_num
+    {
         return Err(SegmentVerificationError::RangeError);
     }
 
