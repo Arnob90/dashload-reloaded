@@ -1,6 +1,6 @@
 use crate::segment::SegmentData;
 use serde::{Deserialize, Serialize};
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DownloadData {
     pub url: String,
     pub filepath: String,

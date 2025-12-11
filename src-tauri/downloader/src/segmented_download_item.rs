@@ -1,12 +1,16 @@
+use crate::commandenum::{Command, CommandMaybe, construct_command_sender_reciever};
 use crate::download_data::DownloadData;
+use crate::downloadrunerror::DownloadRunErrors;
 use crate::misc::FutureVec;
+use crate::normal_download_strategies::GetFileError;
 use crate::segment::{DeleteSegmentError, SegmentStatusGetter};
 use crate::segmented_verifier::verify_segmented;
 use crate::{
+    downloadrunerror::DownloadRunError,
     idownloaditem::DeleteFileError,
     idownloaditem::IRunningDownloadItem,
     length_getter,
-    segment::{self, DownloadRunError, DownloadStatusCheckError, Segment, SegmentData},
+    segment::{self, DownloadStatusCheckError, Segment, SegmentData},
     segmented_verifier,
     segmenter::{self, segment_into_portions},
     statuses::{self, DownloadStatus},
@@ -19,12 +23,12 @@ use getset::{CloneGetters, Getters};
 use log::info;
 use reqwest::{self};
 use serde::Serialize;
-use std::panic;
 use std::path::{self, Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::watch;
 use tokio::{fs, io::AsyncWriteExt};
-
+type DownloadRunErrorsMaybe = Option<DownloadRunErrors>;
 #[derive(Getters, CloneGetters)]
 pub struct SegmentedRunningDownloadItem {
     #[getset(get = "pub")]
@@ -33,16 +37,18 @@ pub struct SegmentedRunningDownloadItem {
     status_getters: Vec<segment::SegmentStatusGetter>,
     #[getset(get_clone = "pub")]
     client: reqwest::Client,
-    status_sender: tokio::sync::watch::Sender<statuses::DownloadStatus>,
-    status_reciever: tokio::sync::watch::Receiver<statuses::DownloadStatus>,
+    command_sender: watch::Sender<CommandMaybe>,
+    command_reciever: watch::Receiver<CommandMaybe>,
     #[getset(get = "pub")]
     url: String,
     #[getset(get = "pub")]
     filepath: std::path::PathBuf,
     #[getset(get_copy = "pub")]
-    filesize: u64,
+    filesize: Option<u64>,
     #[getset(get_copy = "pub")]
     polling_rate_ms: u64,
+    error_reciever: watch::Receiver<DownloadRunErrorsMaybe>,
+    error_sender: watch::Sender<DownloadRunErrorsMaybe>,
 }
 
 #[derive(Error, Debug, Serialize, Clone)]
@@ -152,21 +158,20 @@ impl SegmentedRunningDownloadItem {
         .await?;
         let (required_segments, required_segment_getters) =
             required_segments_and_getters.into_iter().unzip();
-        let (status_sender, status_reciever) =
-            tokio::sync::watch::channel(statuses::DownloadStatus::Running {
-                total: Some(length),
-                downloaded: 0,
-            });
+        let (command_sender, command_reciever) = construct_command_sender_reciever();
+        let (error_sender, error_reciever) = watch::channel::<DownloadRunErrorsMaybe>(None);
         let required_segment = Self {
             segments_to_run: required_segments,
             status_getters: required_segment_getters,
             client,
-            status_sender,
-            status_reciever,
+            command_sender,
+            command_reciever,
             url: url.to_string(),
             filepath: filepath_to_download.to_path_buf(),
-            filesize: length,
+            filesize: Some(length),
             polling_rate_ms,
+            error_sender,
+            error_reciever,
         };
         required_segment.serialize_data().await?;
         Ok(required_segment)
@@ -183,7 +188,7 @@ impl SegmentedRunningDownloadItem {
         );
         let required_item_clone = required_item.clone();
         let handle = tokio::spawn(async move {
-            let _ = required_item_clone.start_internal().await;
+            let _ = required_item_clone.start_helper().await;
         });
         std::mem::drop(handle);
         Ok(required_item)
@@ -218,21 +223,20 @@ impl SegmentedRunningDownloadItem {
             required_segments.push(segment);
             required_segment_getters.push(getter);
         }
-        let (status_sender, status_reciever) =
-            tokio::sync::watch::channel(statuses::DownloadStatus::Running {
-                total: required_data.length,
-                downloaded: 0,
-            });
+        let (command_sender, command_reciever) = construct_command_sender_reciever();
+        let (error_sender, error_reciever) = watch::channel::<DownloadRunErrorsMaybe>(None);
         let required_item = Self {
             segments_to_run: required_segments,
             status_getters: required_segment_getters,
             client,
-            status_sender,
-            status_reciever,
             url: required_data.url,
             filepath: filepath_to_download.to_path_buf(),
-            filesize: required_data.length.unwrap(),
+            filesize: required_data.length,
             polling_rate_ms,
+            command_sender,
+            command_reciever,
+            error_sender,
+            error_reciever,
         };
         Ok(required_item)
     }
@@ -244,7 +248,7 @@ impl SegmentedRunningDownloadItem {
         let required_item = Arc::new(Self::resume(client, filepath, polling_rate_ms).await?);
         let required_item_clone = required_item.clone();
         let handle = tokio::spawn(async move {
-            let _ = required_item_clone.start_internal().await;
+            let _ = required_item_clone.start_helper().await;
         });
         std::mem::drop(handle);
         Ok(required_item)
@@ -265,126 +269,169 @@ impl SegmentedRunningDownloadItem {
 }
 
 impl SegmentedRunningDownloadItem {
-    async fn start_helper(&self) -> Result<(), DownloadRunError> {
+    fn send_err(&self, err: DownloadRunError) {
+        let _ = self
+            .error_sender
+            .send(Some(DownloadRunErrors { errors: vec![err] }));
+    }
+    async fn start_helper(&self) {
         //There should be at least one segment
         let first_segment = &self.segments_to_run[0];
-        verify_segmented(
+        let verify = verify_segmented(
             self.client.clone(),
             &self.url,
             first_segment.data.start,
             first_segment.data.end,
         )
         .await
-        .map_err(DownloadRunError::SegmentVerificationError)?;
-        let status_sender = self.status_sender.clone();
-        let _ = status_sender.send(statuses::DownloadStatus::Running {
-            downloaded: 0,
-            total: Some(self.filesize),
-        });
+        .map_err(DownloadRunError::SegmentVerificationError);
+        if let Err(err) = verify {
+            self.send_err(err);
+            return;
+        }
         let mut futures: FutureVec<Result<(), DownloadRunError>> = vec![];
         for segment in self.segments_to_run.iter() {
             futures.push(Box::pin(segment.start()));
         }
         //Download in segments
         let results = join_all(futures).await;
-        let current_status = status_sender.borrow().clone();
-        if let DownloadStatus::Paused = current_status {
-            return Ok(());
+        let errs: Vec<DownloadRunError> = results
+            .into_iter()
+            .filter(|e| e.is_err())
+            .map(|e| e.unwrap_err())
+            .collect();
+        if !errs.is_empty() {
+            let _ = self
+                .error_sender
+                .send(Some(DownloadRunErrors { errors: errs }));
+            return;
         }
-        if let DownloadStatus::Stopped = current_status {
-            return Ok(());
-        }
-        for result in results {
-            //Propagate any errors
-            result?;
+        let command = self.command_sender.borrow().clone();
+        if let Some(command) = command {
+            if command == Command::Pause || command == Command::Stop {
+                return;
+            }
         }
         let filepath_to_merge_to = self.filepath.clone();
         if self.segments_to_run.len() == 1 {
-            fs::rename(&self.segments_to_run[0].data.filepath, &self.filepath).await?;
+            let err_maybe =
+                fs::rename(&self.segments_to_run[0].data.filepath, &self.filepath).await;
+            if let Err(_) = err_maybe {
+                self.send_err(DownloadRunError::FileCreationError(GetFileError::Creation));
+                return;
+            }
         }
         //This must've succeeded so far
-        let mut final_file = tokio::fs::OpenOptions::new()
+        let final_file_maybe = tokio::fs::OpenOptions::new()
             .create(true)
             .truncate(true)
             .write(true)
             .open(filepath_to_merge_to)
-            .await?;
+            .await;
+        if final_file_maybe.is_err() {
+            self.send_err(DownloadRunError::FileOpenError);
+            return;
+        }
+        let mut final_file = final_file_maybe.unwrap();
         for segment in &self.segments_to_run {
-            let data_read = fs::read(&segment.data.filepath).await?;
-            final_file.write_all(&data_read).await?;
-            fs::remove_file(&segment.data.filepath).await?;
-        }
-        let total_downloaded = self.status_getters.iter().map(|status| {
-            let current_status = status.reciever.borrow();
-            if let DownloadStatus::Completed { total } = *current_status {
-                total
+            let data_read_maybe = fs::read(&segment.data.filepath).await;
+            if let Err(_) = data_read_maybe {
+                self.send_err(DownloadRunError::FileOpenError);
+                return;
             }
-            else {
-                panic!("How is this possible? The download should be completed! Something has gone horribly wrong.");
+            let data_read = data_read_maybe.unwrap();
+            let file_write_err = final_file.write_all(&data_read).await;
+            if let Err(err) = file_write_err {
+                self.send_err(DownloadRunError::FileWriteError(err.to_string()));
             }
-        }).sum();
-        let _ = status_sender.send(DownloadStatus::Completed {
-            total: total_downloaded,
-        });
-        Ok(())
-    }
-    async fn start_internal(&self) -> Result<(), DownloadRunError> {
-        let err_maybe = self.start_helper().await;
-        if let Err(err) = err_maybe {
-            let _ = self
-                .status_sender
-                .send(statuses::DownloadStatus::Failed(err));
+            fs::remove_file(&segment.data.filepath).await;
         }
-        Ok(())
     }
 }
 
 #[async_trait]
 impl IRunningDownloadItem for SegmentedRunningDownloadItem {
     fn get_status(&self) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError> {
-        let current_status_maybe = self.status_reciever.borrow();
-        let current_status_maybe_clone = current_status_maybe.clone();
-        let current_status = current_status_maybe_clone;
-        if let DownloadStatus::Paused = current_status {
-            Ok(DownloadStatus::Paused)
-        } else if let DownloadStatus::Running {
-            total,
-            downloaded: _,
-        } = current_status
-        {
-            let segment_statuses_results: Vec<Result<DownloadStatus, DownloadStatusCheckError>> =
-                self.status_getters
-                    .iter()
-                    .map(|getter| getter.get_status())
-                    .collect();
-            let mut segment_statuses: Vec<DownloadStatus> = vec![];
-            for result in segment_statuses_results {
-                segment_statuses.push(result?);
+        let current_failed = self.error_reciever.borrow().clone();
+        if let Some(failed) = current_failed {
+            return Ok(statuses::DownloadStatus::Failed(failed));
+        }
+        let statuses_maybe_vec: Vec<Result<statuses::DownloadStatus, DownloadStatusCheckError>> =
+            self.status_getters
+                .iter()
+                .map(|getter| getter.get_status())
+                .collect();
+        let mut status_vec: Vec<DownloadStatus> = vec![];
+        for status_maybe in statuses_maybe_vec {
+            status_vec.push(status_maybe?);
+        }
+        let first_status = status_vec
+            .get(0)
+            .ok_or(DownloadStatusCheckError::NoStatusError)?
+            .clone();
+        let mut total_downloaded: u64 = 0;
+        //Speed must add up due to sum rule of derivative
+        let mut total_download_speed: f64 = 0.0;
+        let mut completed_num = 0;
+        let status_vec_len = status_vec.len();
+        for status in status_vec.into_iter() {
+            if !matches!(first_status, DownloadStatus::Completed { .. }) && first_status != status {
+                //We are in the midst of a phase transtion, I hope
+                return Ok(DownloadStatus::Running {
+                    total: None,
+                    downloaded: 0,
+                    download_speed: 0.0,
+                    downloaded_portion: None,
+                    eta_ms: None,
+                });
             }
-            let mut total_downloaded: u64 = 0;
-            for segment_status in segment_statuses.iter_mut() {
-                if matches!(
-                    segment_status,
-                    statuses::DownloadStatus::Paused | statuses::DownloadStatus::Stopped
-                ) {
-                    return Ok(segment_status.clone());
+            match status {
+                DownloadStatus::Running {
+                    downloaded,
+                    download_speed,
+                    ..
+                } => {
+                    total_downloaded += downloaded;
+                    total_download_speed += download_speed;
                 }
-                if let statuses::DownloadStatus::Running {
-                    downloaded: segment_downloaded,
-                    total: _,
-                } = segment_status
-                {
-                    total_downloaded += *segment_downloaded;
-                } else if let statuses::DownloadStatus::Completed { total } = segment_status {
-                    total_downloaded += *total;
+                DownloadStatus::Stopped => {
+                    return Ok(DownloadStatus::Stopped);
+                }
+                DownloadStatus::Paused { downloaded, .. } => {
+                    total_downloaded += downloaded;
+                }
+                DownloadStatus::Completed { total } => {
+                    total_downloaded += total;
+                    completed_num += 1;
+                }
+                DownloadStatus::Failed(err) => {
+                    return Ok(DownloadStatus::Failed(err));
                 }
             }
-            Ok(statuses::DownloadStatus::Running {
+        }
+        if let DownloadStatus::Paused { .. } = first_status {
+            return Ok(DownloadStatus::Paused {
                 downloaded: total_downloaded,
-                total,
-            })
-        } else {
-            Ok(current_status.clone())
+                total: self.filesize,
+            });
+        }
+        //Otherwise, it must be running
+        else {
+            if completed_num == status_vec_len {
+                return Ok(DownloadStatus::Completed {
+                    total: total_downloaded,
+                });
+            } else {
+                return Ok(DownloadStatus::Running {
+                    total: self.filesize,
+                    downloaded: total_downloaded,
+                    download_speed: total_download_speed,
+                    downloaded_portion: self
+                        .filesize
+                        .map(|total| (total_downloaded as f64) / (total as f64)),
+                    eta_ms: None,
+                });
+            }
         }
     }
     fn filename(&self) -> String {
@@ -411,16 +458,13 @@ impl IRunningDownloadItem for SegmentedRunningDownloadItem {
         for segment in &self.segments_to_run {
             segment.pause();
         }
-        let _ = self.status_sender.send(statuses::DownloadStatus::Paused);
-    }
-    fn get_status_reciever(&self) -> tokio::sync::watch::Receiver<statuses::DownloadStatus> {
-        self.status_reciever.clone()
+        let _ = self.command_sender.send(Some(Command::Pause));
     }
     fn get_download_data(&self) -> DownloadData {
         DownloadData {
             url: self.url.clone(),
             filepath: self.filepath.to_string_lossy().to_string(),
-            length: Some(self.filesize),
+            length: self.filesize,
             segments: self
                 .segments_to_run
                 .iter()
@@ -429,6 +473,7 @@ impl IRunningDownloadItem for SegmentedRunningDownloadItem {
         }
     }
     async fn cancel(&self) -> Result<(), DeleteFileError> {
+        self.command_sender.send(Some(Command::Stop));
         for segment in &self.segments_to_run {
             segment
                 .delete()

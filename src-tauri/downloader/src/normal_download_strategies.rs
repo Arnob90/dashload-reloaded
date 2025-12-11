@@ -1,4 +1,4 @@
-use crate::segment::DownloadRunError;
+use crate::downloadrunerror::DownloadRunError;
 use crate::segmented_verifier::SegmentVerificationError;
 use async_trait::async_trait;
 use fs2::FileExt;

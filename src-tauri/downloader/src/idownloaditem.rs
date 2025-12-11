@@ -2,8 +2,9 @@ use std::any::Any;
 
 use crate::{
     download_data::DownloadData,
-    segment::{self, DownloadRunError},
-    statuses,
+    downloadrunerror::DownloadRunError,
+    segment::{self},
+    statuses::{self, DownloadStatus},
 };
 use async_trait::async_trait;
 use serde::Serialize;
@@ -23,7 +24,6 @@ pub trait IRunningDownloadItem: Send + Sync + Any {
     fn get_url(&self) -> String;
     fn get_update_interval_ms(&self) -> u64;
     fn pause(&self);
-    fn get_status_reciever(&self) -> tokio::sync::watch::Receiver<statuses::DownloadStatus>;
     fn get_download_data(&self) -> DownloadData;
     async fn cancel(&self) -> Result<(), DeleteFileError>;
 }
@@ -50,5 +50,5 @@ pub struct IDownloadData {
     pub filepath: String,
     pub filename: String,
     pub url: String,
-    pub status: RichDownloadStatus,
+    pub status: DownloadStatus,
 }

@@ -1,3 +1,4 @@
+//TODO: Fix remaining problems
 use crate::downloaditem::{DownloadHandle, DownloadItem};
 use crate::idownloaditem::IDownloadData;
 use crate::misc::FutureVec;
@@ -89,118 +90,33 @@ impl DownloadManager {
         &self,
         item_id: String,
     ) -> Result<IDownloadData, DownloadStatusGetError> {
-        let item = self
+        let required_item = self
             .download_items
             .get(&item_id)
             .ok_or(DownloadStatusGetError::IdDoesNotExist)?;
-        let item_handle_lock = item.handle.read().await;
-        let item_handle = &*item_handle_lock;
-        if let DownloadHandle::Terminal(item) = item_handle {
-            let data = &item.data;
-            let status = &item.status;
-            let rich_status = match status {
-                statuses::DownloadStatus::Running { .. } => {
-                    unreachable!("A terminal item is never running!")
-                }
-                statuses::DownloadStatus::Completed { total } => {
-                    RichDownloadStatus::Completed { total: *total }
-                }
-                statuses::DownloadStatus::Failed(e) => RichDownloadStatus::Failed(e.clone()),
-                statuses::DownloadStatus::Stopped => RichDownloadStatus::Stopped,
-                statuses::DownloadStatus::Paused => RichDownloadStatus::Paused,
-            };
-            let filename = Path::new(&data.filepath)
-                .file_name()
-                .unwrap()
-                .to_string_lossy();
-            Ok(IDownloadData {
-                status: rich_status,
-                filename: filename.into(),
-                filepath: data.filepath.clone(),
-                url: data.url.clone(),
-            })
-        } else if let DownloadHandle::Running(item) = item_handle {
-            let filename = item.filename();
-            let filepath = item.filepath();
-            let url = item.get_url();
-            let current_status = item.get_status()?;
-            // --- Phase 1: Calculate speed and update history atomically ---
-            let now = Instant::now();
-            let mut speed_mbps = 0.0; // Default to 0
-
-            // Get a mutable handle to the history entry for this ID.
-            // This is an atomic operation that locks only one shard of the DashMap.
-            let mut history_entry = self
-                .status_history
-                .entry(item_id.to_string())
-                .or_insert_with(|| (current_status.clone(), now)); // Insert if it doesn't exist
-
-            // Now we have the previous state, `history_entry` is a `RefMut` to `(status, time)`
-            let (prev_status, prev_time) = &*history_entry;
-
-            // Calculate speed based on the previous state.
-            if let (
-                statuses::DownloadStatus::Running {
-                    downloaded: current_bytes,
-                    ..
-                },
-                statuses::DownloadStatus::Running {
-                    downloaded: prev_bytes,
-                    ..
-                },
-            ) = (&current_status, prev_status)
-            {
-                let time_elapsed = now.duration_since(*prev_time).as_secs_f64();
-                if time_elapsed > 0.0 {
-                    let bytes_diff = ((*current_bytes as i64) - (*prev_bytes as i64)) as f64;
-                    if bytes_diff >= 0.0 {
-                        speed_mbps = (bytes_diff / 1024.0 / 1024.0) / time_elapsed;
-                    } else {
-                        speed_mbps = 0.0;
-                    }
-                }
+        let (data, status) = {
+            let lock = required_item.handle.read().await;
+            match *lock {
+                DownloadHandle::Running(ref item) => (
+                    item.get_download_data(),
+                    item.get_status()
+                        .map_err(DownloadStatusGetError::StatusCheckError)?,
+                ),
+                DownloadHandle::Terminal(ref item) => (item.data.clone(), item.status.clone()),
             }
-
-            // Update the history entry with the current values.
-            *history_entry = (current_status.clone(), now);
-
-            // The DashMap lock is released when `history_entry` goes out of scope here.
-
-            // --- Phase 2: Translate to the rich DTO
-            let rich_status = match current_status {
-                statuses::DownloadStatus::Running { downloaded, total } => {
-                    RichDownloadStatus::Running {
-                        downloaded,
-                        total,
-                        download_speed: speed_mbps,
-                        downloaded_portion: total.map(|total| downloaded as f64 / total as f64),
-                        eta_secs: total.and_then(|total| {
-                            let diff_bytes = total.saturating_sub(downloaded);
-                            let diff = diff_bytes as f64 / 1024.0 / 1024.0;
-                            if speed_mbps <= 0.0 {
-                                return None;
-                            }
-                            Some(diff / speed_mbps)
-                        }),
-                    }
-                }
-                statuses::DownloadStatus::Completed { total } => {
-                    RichDownloadStatus::Completed { total }
-                }
-                statuses::DownloadStatus::Failed(e) => RichDownloadStatus::Failed(e),
-                statuses::DownloadStatus::Stopped => RichDownloadStatus::Stopped,
-                statuses::DownloadStatus::Paused => RichDownloadStatus::Paused,
-            };
-
-            Ok(IDownloadData {
-                status: rich_status,
-                filename,
-                filepath,
-                url,
-            })
-        } else {
-            unreachable!("A download is either terminal or running")
-        }
+        };
+        let full_filepath = Path::new(&data.filepath);
+        let filename = full_filepath
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        Ok(IDownloadData {
+            status,
+            filepath: data.filepath,
+            url: data.url,
+            filename,
+        })
     }
     pub async fn get_all_items(
         &self,

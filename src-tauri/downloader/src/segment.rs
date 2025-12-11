@@ -1,15 +1,19 @@
-use crate::normal_download_strategies::{self, FullDownloadStrategy, GetFileError};
+use crate::commandenum::{Command, CommandMaybe, construct_command_sender_reciever};
+use crate::downloadrunerror::DownloadRunError;
+use crate::normal_download_strategies::{self, FullDownloadStrategy};
 use crate::segmented_verifier::{SegmentVerificationError, verify_segmented};
-use crate::statuses::DownloadStatus;
+use crate::statuses::{DownloadStatus, calculate_download_speed, calculate_eta_in_ms};
 use log::info;
 use reqwest::{self, Client};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
+use std::u64;
 use thiserror::Error;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
+
 // --- Composition: Common data is in one place ---
 #[derive(Clone, Serialize, Deserialize)] // Clone is useful for retrying
 pub struct SegmentData {
@@ -23,6 +27,8 @@ pub struct Segment {
     pub data: SegmentData,
     pub sender: watch::Sender<DownloadStatus>,
     reciever: watch::Receiver<DownloadStatus>,
+    command_reciever: watch::Receiver<Option<Command>>,
+    pub command_sender: watch::Sender<Option<Command>>,
     pub client: Client,
     pub polling_rate: u64,
     pub strategy: Box<dyn normal_download_strategies::DownloadStrategy>,
@@ -40,29 +46,6 @@ pub enum DeleteSegmentError {
 
 pub struct SegmentStatusGetter {
     pub reciever: watch::Receiver<DownloadStatus>,
-}
-
-#[derive(Debug, Error, Clone, PartialEq, Serialize)]
-#[serde(tag = "kind", content = "payload")]
-pub enum DownloadRunError {
-    #[error("Failed to open file")]
-    FileOpenError,
-    #[error("Failed to seek file")]
-    ServerNotAvailable,
-    #[error("Failed to seek file")]
-    FileSeekError,
-    #[error("Cannot open file to write error, reason: {0}")]
-    FileWriteError(String),
-    #[error("Download cannot be run twice")]
-    AlreadyRunning,
-    #[error("The file does not match the one kept before resumption")]
-    FileMismatch,
-    #[error("Given path is one to a dir")]
-    DirectoryGivenError,
-    #[error("Failed to create or resume from file")]
-    FileCreationError(GetFileError),
-    #[error("Failed to verify that the download can be segmented")]
-    SegmentVerificationError(SegmentVerificationError),
 }
 
 impl From<std::io::Error> for DownloadRunError {
@@ -84,8 +67,9 @@ pub enum DownloadStatusCheckError {
     DroppedDownloadError,
     #[error("Error on running download")]
     DownloadRunError(DownloadRunError),
+    #[error("No status to get")]
+    NoStatusError,
 }
-
 impl Segment {
     pub async fn new(
         client: reqwest::Client,
@@ -104,8 +88,12 @@ impl Segment {
         let (sender, reciever) = watch::channel(DownloadStatus::Running {
             total: None,
             downloaded: 0,
+            download_speed: 0.0,
+            eta_ms: None,
+            downloaded_portion: Some(0.0),
         });
         let reciever_clone = reciever.clone();
+        let (command_sender, command_reciever) = construct_command_sender_reciever();
         let required_segment = Segment {
             data: given_data,
             sender,
@@ -113,6 +101,8 @@ impl Segment {
             polling_rate,
             reciever: reciever_clone,
             strategy: Box::new(strategy),
+            command_sender,
+            command_reciever,
         };
         Ok((required_segment, SegmentStatusGetter { reciever }))
     }
@@ -127,8 +117,12 @@ impl Segment {
         let (sender, reciever) = watch::channel(DownloadStatus::Running {
             total: None,
             downloaded: 0,
+            download_speed: 0.0,
+            eta_ms: None,
+            downloaded_portion: Some(0.0),
         });
         let reciever_clone = reciever.clone();
+        let (command_sender, command_reciever) = construct_command_sender_reciever();
         let required_segment = Segment {
             data: SegmentData {
                 start: 0,
@@ -141,6 +135,8 @@ impl Segment {
             polling_rate,
             strategy: Box::new(strategy),
             reciever: reciever_clone,
+            command_sender,
+            command_reciever,
         };
         Ok((required_segment, SegmentStatusGetter { reciever }))
     }
@@ -170,8 +166,12 @@ impl Segment {
         let (sender, reciever) = watch::channel(DownloadStatus::Running {
             total: None,
             downloaded: 0,
+            download_speed: 0.0,
+            eta_ms: None,
+            downloaded_portion: Some(0.0),
         });
         let reciever_clone = reciever.clone();
+        let (command_sender, command_reciever) = construct_command_sender_reciever();
         let required_segment = Segment {
             data: given_data,
             sender,
@@ -179,29 +179,33 @@ impl Segment {
             polling_rate,
             strategy: Box::new(strategy),
             reciever: reciever_clone,
+            command_reciever,
+            command_sender,
         };
         Ok((required_segment, SegmentStatusGetter { reciever }))
     }
     pub fn length(&self) -> Option<u64> {
         self.data.end.map(|end| end - self.data.start + 1)
     }
-    fn get_terminal_status_according_to_state(
+    fn get_state_if_terminal(
+        current_command: CommandMaybe,
         downloaded: u64,
         total: Option<u64>,
-        current_state: DownloadStatus,
     ) -> Option<DownloadStatus> {
-        if matches!(current_state, DownloadStatus::Paused { .. }) {
-            return Some(DownloadStatus::Paused { downloaded, total });
-        } else if matches!(current_state, DownloadStatus::Stopped) {
-            return Some(DownloadStatus::Stopped);
+        match current_command {
+            Some(Command::Pause) => Some(DownloadStatus::Paused { downloaded, total }),
+            Some(Command::Stop) => Some(DownloadStatus::Stopped),
+            None => None,
         }
-        return None;
     }
     pub async fn start(&self) -> Result<(), DownloadRunError> {
+        let total = self.length();
         let _ = self.sender.send(DownloadStatus::Running {
-            total: self.length(),
+            total,
             downloaded: self.strategy.get_start() - self.data.start,
-            download_speed: 0,
+            download_speed: 0.0,
+            eta_ms: None,
+            downloaded_portion: Some(0.0),
         });
         let mut res = self
             .strategy
@@ -218,24 +222,23 @@ impl Segment {
             .await
             .map_err(DownloadRunError::FileCreationError)?;
         let mut downloaded: u64 = self.strategy.get_start() - self.data.start;
+        let mut previous_downloaded: u64 = 0;
         let mut polling_interval = tokio::time::interval(Duration::from_millis(self.polling_rate));
         println!("I am here 1");
         loop {
-            let current_status = self.sender.borrow().clone();
-            if matches!(
-                current_status,
-                DownloadStatus::Paused { .. } | DownloadStatus::Stopped
-            ) {
+            let current_command = self.command_sender.borrow().clone();
+            let current_state = Segment::get_state_if_terminal(current_command, downloaded, total);
+            if let Some(current_state) = current_state {
+                let _ = self.sender.send(current_state);
                 return Ok(());
             }
-            let mut reciever_to_use = self.reciever.clone();
+            let mut command_reciever_clone = self.command_reciever.clone();
             tokio::select! {
-                    _ = reciever_to_use.changed() => {
-                        let current_status = reciever_to_use.borrow().clone();
-                        if matches!(
-                            current_status,
-                            DownloadStatus::Paused | DownloadStatus::Stopped
-                        ) {
+                    _ = command_reciever_clone.changed() => {
+                        let current_command = self.command_reciever.borrow().clone();
+                        let current_state = Segment::get_state_if_terminal(current_command,downloaded, total);
+                        if let Some(current_state) = current_state {
+                            let _ = self.sender.send(current_state);
                             return Ok(());
                         }
                     },
@@ -252,7 +255,10 @@ impl Segment {
                         .map_err(|_| DownloadRunError::FileOpenError)?;
                 },
                 _ = polling_interval.tick() => {
-                    let _ = self.sender.send(DownloadStatus::Running { total: self.length(), downloaded });
+                    let download_speed = calculate_download_speed(previous_downloaded, downloaded, polling_interval.period());
+                    let eta = total.and_then(|total| calculate_eta_in_ms(total, download_speed));
+                    let _ = self.sender.send(DownloadStatus::Running { total: self.length(), downloaded, download_speed, eta_ms: eta, downloaded_portion: self.length().map(|len|(downloaded as f64)/(len as f64))});
+                    previous_downloaded = downloaded;
                 }
             }
             let _ = self
@@ -262,11 +268,7 @@ impl Segment {
         Ok(())
     }
     pub fn pause(&self) {
-        //We don't how much we have downloaded yet
-        let _ = self.sender.send(DownloadStatus::Paused {
-            total: self.length(),
-            downloaded: 0,
-        });
+        let _ = self.command_sender.send(Some(Command::Pause));
     }
     pub async fn delete(&self) -> Result<(), DeleteSegmentError> {
         let _ = self.sender.send(DownloadStatus::Stopped);

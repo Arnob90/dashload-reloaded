@@ -1,7 +1,10 @@
 #![allow(dead_code)]
+pub mod commandenum;
 pub mod download_data;
 pub mod download_manager;
 pub mod downloaditem;
+pub mod downloadrunerror;
+pub mod errors;
 pub mod filename_getter;
 pub mod get_download_info;
 pub mod idownloaditem;
