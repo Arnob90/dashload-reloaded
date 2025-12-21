@@ -41,10 +41,10 @@ impl DownloadItem {
                 match *lock {
                     DownloadHandle::Running(ref item) => {
                         let status_maybe = item.get_status();
-                        if status_maybe.is_err() {
-                            continue;
+                        if let Ok(status) = status_maybe {
+                            (status, item.get_download_data(), false)
                         } else {
-                            (status_maybe.unwrap(), item.get_download_data(), false)
+                            continue;
                         }
                     }
                     DownloadHandle::Terminal(ref item) => {
@@ -66,7 +66,7 @@ impl DownloadItem {
                     .replace_with_terminal(data, current_status)
                     .await;
             }
-            tokio::time::sleep(Duration::from_millis(self.poll_every_ms));
+            tokio::time::sleep(Duration::from_millis(self.poll_every_ms)).await;
         }
     }
 }

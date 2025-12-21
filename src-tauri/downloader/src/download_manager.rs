@@ -4,11 +4,10 @@ use crate::idownloaditem::IDownloadData;
 use crate::misc::FutureVec;
 use crate::resume_download_factory::{DownloadResumeFactory, ResumeFactoryErr};
 use crate::segment::DownloadStatusCheckError;
-use crate::statuses;
-use crate::{
-    idownloaditem::RichDownloadStatus,
-    segmented_download_item::{SegmentedDownloadItemCreationError, SegmentedRunningDownloadItem},
+use crate::segmented_download_item::{
+    SegmentedDownloadItemCreationError, SegmentedRunningDownloadItem,
 };
+use crate::statuses::{self, DownloadStatus};
 use dashmap::DashMap;
 use futures::future::join_all;
 use serde::Serialize;
@@ -69,16 +68,19 @@ impl DownloadManager {
         filepath: PathBuf,
         number_of_segments: u64,
     ) -> Result<(), SegmentedDownloadItemCreationError> {
-        let required_download_item = DownloadItem::new(DownloadHandle::Running(
-            SegmentedRunningDownloadItem::new(
-                self.client.clone(),
-                &url,
-                filepath,
-                number_of_segments,
-                self.poll_every_ms,
-            )
-            .await?,
-        ))
+        let required_download_item = DownloadItem::new(
+            DownloadHandle::Running(
+                SegmentedRunningDownloadItem::new(
+                    self.client.clone(),
+                    &url,
+                    filepath,
+                    number_of_segments,
+                    self.poll_every_ms,
+                )
+                .await?,
+            ),
+            self.poll_every_ms,
+        )
         .await;
         let uuid = Uuid::new_v4().as_simple().to_string();
         self.download_items.insert(uuid, required_download_item);
@@ -147,7 +149,7 @@ impl DownloadManager {
         }
         let to_resume_data = to_resume.map_err(|_| ResumeError::MiscError)?;
         let resume_status = to_resume_data.status;
-        if resume_status == RichDownloadStatus::Paused {
+        if let DownloadStatus::Paused { .. } = resume_status {
             let filepath_to_resume = Path::new(&to_resume_data.filepath);
             let handle = DownloadResumeFactory::resume_from_filepath(
                 self.client.clone(),
@@ -159,7 +161,7 @@ impl DownloadManager {
             self.status_history.remove(item_id);
             self.download_items.insert(
                 item_id.to_string(),
-                DownloadItem::new(DownloadHandle::Running(handle)).await,
+                DownloadItem::new(DownloadHandle::Running(handle), self.poll_every_ms).await,
             );
             Ok(())
         } else {

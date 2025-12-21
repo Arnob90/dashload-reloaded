@@ -8,14 +8,13 @@ use reqwest::{self, Client};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
-use std::u64;
 use thiserror::Error;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 
 // --- Composition: Common data is in one place ---
-#[derive(Clone, Serialize, Deserialize)] // Clone is useful for retrying
+#[derive(Clone, Serialize, Deserialize, Debug)] // Clone is useful for retrying
 pub struct SegmentData {
     pub start: u64,
     pub end: Option<u64>,

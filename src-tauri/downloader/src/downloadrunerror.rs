@@ -1,7 +1,7 @@
 use crate::errors::get_err_string_for_multi_errors;
 use crate::normal_download_strategies::GetFileError;
 use crate::segmented_verifier::SegmentVerificationError;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq, Serialize)]

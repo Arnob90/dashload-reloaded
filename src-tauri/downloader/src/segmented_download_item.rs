@@ -307,16 +307,16 @@ impl SegmentedRunningDownloadItem {
             return;
         }
         let command = self.command_sender.borrow().clone();
-        if let Some(command) = command {
-            if command == Command::Pause || command == Command::Stop {
-                return;
-            }
+        if let Some(command) = command
+            && (command == Command::Pause || command == Command::Stop)
+        {
+            return;
         }
         let filepath_to_merge_to = self.filepath.clone();
         if self.segments_to_run.len() == 1 {
             let err_maybe =
                 fs::rename(&self.segments_to_run[0].data.filepath, &self.filepath).await;
-            if let Err(_) = err_maybe {
+            if err_maybe.is_err() {
                 self.send_err(DownloadRunError::FileCreationError(GetFileError::Creation));
                 return;
             }
@@ -335,7 +335,7 @@ impl SegmentedRunningDownloadItem {
         let mut final_file = final_file_maybe.unwrap();
         for segment in &self.segments_to_run {
             let data_read_maybe = fs::read(&segment.data.filepath).await;
-            if let Err(_) = data_read_maybe {
+            if data_read_maybe.is_err() {
                 self.send_err(DownloadRunError::FileOpenError);
                 return;
             }
@@ -344,7 +344,7 @@ impl SegmentedRunningDownloadItem {
             if let Err(err) = file_write_err {
                 self.send_err(DownloadRunError::FileWriteError(err.to_string()));
             }
-            fs::remove_file(&segment.data.filepath).await;
+            let _ = fs::remove_file(&segment.data.filepath).await;
         }
     }
 }
@@ -366,7 +366,7 @@ impl IRunningDownloadItem for SegmentedRunningDownloadItem {
             status_vec.push(status_maybe?);
         }
         let first_status = status_vec
-            .get(0)
+            .first()
             .ok_or(DownloadStatusCheckError::NoStatusError)?
             .clone();
         let mut total_downloaded: u64 = 0;
@@ -410,28 +410,26 @@ impl IRunningDownloadItem for SegmentedRunningDownloadItem {
             }
         }
         if let DownloadStatus::Paused { .. } = first_status {
-            return Ok(DownloadStatus::Paused {
+            Ok(DownloadStatus::Paused {
                 downloaded: total_downloaded,
                 total: self.filesize,
-            });
+            })
         }
         //Otherwise, it must be running
-        else {
-            if completed_num == status_vec_len {
-                return Ok(DownloadStatus::Completed {
-                    total: total_downloaded,
-                });
-            } else {
-                return Ok(DownloadStatus::Running {
-                    total: self.filesize,
-                    downloaded: total_downloaded,
-                    download_speed: total_download_speed,
-                    downloaded_portion: self
-                        .filesize
-                        .map(|total| (total_downloaded as f64) / (total as f64)),
-                    eta_ms: None,
-                });
-            }
+        else if completed_num == status_vec_len {
+            Ok(DownloadStatus::Completed {
+                total: total_downloaded,
+            })
+        } else {
+            Ok(DownloadStatus::Running {
+                total: self.filesize,
+                downloaded: total_downloaded,
+                download_speed: total_download_speed,
+                downloaded_portion: self
+                    .filesize
+                    .map(|total| (total_downloaded as f64) / (total as f64)),
+                eta_ms: None,
+            })
         }
     }
     fn filename(&self) -> String {
@@ -473,7 +471,7 @@ impl IRunningDownloadItem for SegmentedRunningDownloadItem {
         }
     }
     async fn cancel(&self) -> Result<(), DeleteFileError> {
-        self.command_sender.send(Some(Command::Stop));
+        let _ = self.command_sender.send(Some(Command::Stop));
         for segment in &self.segments_to_run {
             segment
                 .delete()

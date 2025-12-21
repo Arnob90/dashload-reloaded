@@ -1,5 +1,3 @@
-use std::u64;
-
 use crate::downloadrunerror::DownloadRunErrors;
 use serde::Serialize;
 #[derive(Clone, PartialEq, Debug, Serialize)]
