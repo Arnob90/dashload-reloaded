@@ -1,4 +1,5 @@
 use serde::Serialize;
+use thiserror::Error;
 use url::Url;
 
 use crate::{filename_getter, length_getter, segmented_verifier};
@@ -9,10 +10,12 @@ pub struct DownloadInfo {
     filesize: Option<u64>,
     segmented_possible: bool,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Error)]
 #[serde(tag = "kind", content = "payload")]
 pub enum DownloadInfoGetError {
+    #[error("Request Failed: {0}")]
     RequestError(String),
+    #[error("Invalid Url: {0}")]
     UrlError(String),
 }
 impl From<reqwest::Error> for DownloadInfoGetError {

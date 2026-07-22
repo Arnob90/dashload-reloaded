@@ -1,7 +1,7 @@
 use crate::segment::DownloadRunError;
-use async_trait::async_trait;
 use fs2::FileExt;
 use reqwest::{Response, StatusCode};
+use serde::Serialize;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -9,7 +9,7 @@ use thiserror::Error;
 use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Serialize, Clone, PartialEq)]
 pub enum GetFileError {
     #[error("Cannot create the file!")]
     Creation,
@@ -21,7 +21,7 @@ pub enum GetFileError {
     Timeout,
 }
 
-async fn get_file_lock_within_timeout_idiomatic(
+async fn get_file_lock_within_timeout(
     filepath: PathBuf,
     options: OpenOptions,
     timeout: Duration,
@@ -59,15 +59,14 @@ async fn get_file_lock_within_timeout_idiomatic(
         .await
         .map_err(|_| GetFileError::Timeout)?
 }
-#[async_trait]
+#[async_trait::async_trait]
 pub trait DownloadStrategy: Send + Sync {
     async fn run(&self, client: reqwest::Client, url: &str) -> Result<Response, DownloadRunError>;
     fn get_start(&self) -> u64;
     async fn get_file(&self, filepath: &Path) -> Result<File, GetFileError>;
 }
 pub struct FullDownloadStrategy;
-
-#[async_trait]
+#[async_trait::async_trait]
 impl DownloadStrategy for FullDownloadStrategy {
     async fn run(&self, client: reqwest::Client, url: &str) -> Result<Response, DownloadRunError> {
         let res = client.get(url).send().await?;
@@ -78,7 +77,7 @@ impl DownloadStrategy for FullDownloadStrategy {
     }
     async fn get_file(&self, filepath: &Path) -> Result<File, GetFileError> {
         let filepath_clone = filepath.to_path_buf();
-        let file = get_file_lock_within_timeout_idiomatic(
+        let file = get_file_lock_within_timeout(
             filepath_clone,
             std::fs::OpenOptions::new()
                 .create(true)
@@ -86,7 +85,7 @@ impl DownloadStrategy for FullDownloadStrategy {
                 .write(true)
                 .truncate(true)
                 .clone(),
-            Duration::from_millis(500),
+            Duration::from_millis(400),
         )
         .await?;
         Ok(file)
@@ -101,8 +100,7 @@ pub struct ResumedDownloadStrategy {
     pub end: Option<u64>,
     pub segment_start_offset: u64,
 }
-
-#[async_trait]
+#[async_trait::async_trait]
 impl DownloadStrategy for ResumedDownloadStrategy {
     async fn run(&self, client: reqwest::Client, url: &str) -> Result<Response, DownloadRunError> {
         let range_header = format!(
@@ -123,7 +121,7 @@ impl DownloadStrategy for ResumedDownloadStrategy {
     }
     async fn get_file(&self, filepath: &Path) -> Result<File, GetFileError> {
         let filepath_clone = filepath.to_path_buf();
-        let mut file = get_file_lock_within_timeout_idiomatic(
+        let mut file = get_file_lock_within_timeout(
             filepath_clone,
             OpenOptions::new()
                 .create(true)

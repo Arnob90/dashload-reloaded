@@ -9,11 +9,9 @@ use crate::{
     segmenter::{self, segment_into_portions},
     statuses::{self, DownloadStatus},
 };
-use async_trait::async_trait;
 use futures::future::join_all;
 use getset;
 use getset::{CloneGetters, Getters};
-use log::info;
 use reqwest::{self};
 use serde::Serialize;
 use std::path::{self, Path, PathBuf};
@@ -98,8 +96,7 @@ impl SegmentedRunningDownloadItem {
         let segment_ranges = segment_into_portions(length, number_of_segments)?;
         let mut required_segments: Vec<(Segment, SegmentStatusGetter)> = vec![];
         for (i, segment_range) in segment_ranges.iter().enumerate() {
-            let segment_path = format!("{}.{}", filepath.to_str().unwrap(), i);
-            info!("Segment path: {}", segment_path);
+            let segment_path = format!("{}.{}", filepath.to_string_lossy(), i);
             let segment_data = SegmentData {
                 start: segment_range.start,
                 end: segment_range.end,
@@ -122,7 +119,7 @@ impl SegmentedRunningDownloadItem {
         let filepath_to_download = &filepath;
         filepath_to_download.file_name().ok_or(
             SegmentedDownloadItemCreationError::InvalidFilepathError(
-                filepath.to_str().unwrap().to_string(),
+                filepath.to_string_lossy().to_string(),
             ),
         )?;
         let length = length_getter::get_length(client.clone(), url).await?;
@@ -303,7 +300,6 @@ impl SegmentedRunningDownloadItem {
     }
 }
 
-#[async_trait]
 impl IRunningDownloadItem for SegmentedRunningDownloadItem {
     fn get_status(&self) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError> {
         let current_status_maybe = self.status_reciever.borrow();

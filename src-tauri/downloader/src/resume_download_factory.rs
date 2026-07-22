@@ -22,6 +22,8 @@ pub enum ResumeFactoryErr {
     SegmentedDownloadCreationError(SegmentedDownloadItemCreationError),
     #[error("Normal download cannot be created")]
     NormalDownloadCreationError(NormalDownloadItemCreationError),
+    #[error("The given filepath to resume from is wrong")]
+    InvalidFilepathError,
 }
 impl DownloadResumeFactory {
     pub async fn resume_from_filepath(

@@ -1,4 +1,4 @@
-use crate::normal_download_strategies;
+use crate::normal_download_strategies::{self, GetFileError};
 use crate::segmented_verifier::{SegmentVerificationError, verify_segmented};
 use crate::statuses::DownloadStatus;
 use log::info;
@@ -64,6 +64,8 @@ pub enum DownloadRunError {
     FileMismatch,
     #[error("Given path is one to a dir")]
     DirectoryGivenError,
+    #[error("Failed to open file")]
+    GetFileError(GetFileError),
 }
 
 impl From<reqwest::Error> for DownloadRunError {
@@ -173,11 +175,12 @@ impl Segment {
         println!("I am here 0");
         if let reqwest::StatusCode::PARTIAL_CONTENT = res.status() {
             println!("I am here 1");
-            info!(
-                "Current filepath {}",
-                &self.data.filepath.to_string_lossy().to_string()
-            );
-            let mut file = self.strategy.get_file(&self.data.filepath).await.unwrap();
+            info!("Current filepath {}", self.data.filepath.to_string_lossy());
+            let mut file = self
+                .strategy
+                .get_file(&self.data.filepath)
+                .await
+                .map_err(DownloadRunError::GetFileError)?;
             let mut downloaded: u64 = self.strategy.get_start() - self.data.start;
             let mut polling_interval =
                 tokio::time::interval(Duration::from_millis(self.polling_rate));
@@ -189,15 +192,16 @@ impl Segment {
                 tokio::select! {
                     next_chunk_maybe_err = res.chunk() => {
                         let next_chunk_maybe = next_chunk_maybe_err?;
-                        if next_chunk_maybe.is_none() {
+                        if let Some(next_chunk)=next_chunk_maybe {
+                            let chunk_size = next_chunk.len() as u64;
+                            downloaded += chunk_size;
+                            file.write_all(&next_chunk)
+                                .await
+                                .map_err(|e| DownloadRunError::FileWriteError(e.to_string()))?;
+                        }
+                        else {
                             break;
                         }
-                        let next_chunk = next_chunk_maybe.unwrap();
-                        let chunk_size = next_chunk.len() as u64;
-                        downloaded += chunk_size;
-                        file.write_all(&next_chunk)
-                            .await
-                            .map_err(|_| DownloadRunError::FileOpenError)?;
                     },
                     _ = polling_interval.tick() => {
                         let _ = self.sender.send(DownloadStatus::Running { total: Some(self.length()), downloaded });

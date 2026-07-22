@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use log::info;
 use serde::Serialize;
 use std::sync::Arc;
@@ -250,7 +249,6 @@ impl NormalRunningDownloadItem {
     }
 }
 
-#[async_trait]
 impl IRunningDownloadItem for NormalRunningDownloadItem {
     fn get_status(&self) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError> {
         Ok(self.status_reciever.borrow().clone())

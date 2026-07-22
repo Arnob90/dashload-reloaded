@@ -4,6 +4,7 @@ pub mod download_manager;
 pub mod downloaditem;
 pub mod filename_getter;
 pub mod get_download_info;
+pub mod get_error_message;
 pub mod idownloaditem;
 mod lazy;
 pub mod length_getter;

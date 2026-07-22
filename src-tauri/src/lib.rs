@@ -8,13 +8,19 @@ use downloader::filename_getter;
 use downloader::get_download_info::get_download_info;
 use downloader::get_download_info::DownloadInfo;
 use downloader::get_download_info::DownloadInfoGetError;
-use downloader::normal_download_item::NormalDownloadItemCreationError;
-use downloader::segmented_download_item::SegmentedDownloadItemCreationError;
+use downloader::get_error_message::get_error_message;
+use serde::Serialize;
+use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::path::Path;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
+
+fn get_error_message_wrap<T: Serialize + Display>(error: T) -> Value {
+    get_error_message(error).unwrap()
+}
 
 struct AppState {
     client: reqwest::Client,
@@ -41,11 +47,12 @@ async fn start_download_normal(
     state: State<'_, AppState>,
     given_url: &str,
     filepath: &str,
-) -> Result<(), NormalDownloadItemCreationError> {
+) -> Result<(), serde_json::Value> {
     let manager = &state.download_manager;
     manager
         .add_download_normal(given_url.to_string(), filepath.into())
-        .await?;
+        .await
+        .map_err(get_error_message_wrap)?;
     Ok(())
 }
 
@@ -55,11 +62,12 @@ async fn start_download_segmented(
     given_url: &str,
     filepath: &str,
     number_of_segments: u64,
-) -> Result<(), SegmentedDownloadItemCreationError> {
+) -> Result<(), serde_json::Value> {
     let manager = &state.download_manager;
     manager
         .add_download_segmented(given_url.to_string(), filepath.into(), number_of_segments)
-        .await?;
+        .await
+        .map_err(get_error_message_wrap)?;
     Ok(())
 }
 
@@ -77,27 +85,29 @@ async fn open_file(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-async fn get_status(
-    state: State<'_, AppState>,
-) -> Result<HashMap<String, IDownloadData>, DownloadStatusGetError> {
+async fn get_status(state: State<'_, AppState>) -> Result<HashMap<String, IDownloadData>, Value> {
     let manager = &state.download_manager;
-    let status = manager.get_all_items().await?;
+    let status = manager
+        .get_all_items()
+        .await
+        .map_err(get_error_message_wrap)?;
     Ok(status)
 }
 #[tauri::command]
 async fn get_download_metadata(
     state: State<'_, AppState>,
     url: &str,
-) -> Result<DownloadInfo, DownloadInfoGetError> {
-    get_download_info(state.client.clone(), url).await
+) -> Result<DownloadInfo, Value> {
+    get_download_info(state.client.clone(), url)
+        .await
+        .map_err(get_error_message_wrap)
 }
 #[tauri::command]
-async fn get_filename(
-    state: State<'_, AppState>,
-    url: &str,
-) -> Result<String, filename_getter::FilepathGettingError> {
+async fn get_filename(state: State<'_, AppState>, url: &str) -> Result<String, Value> {
     let client = state.client.clone();
-    filename_getter::get_filename(client, url).await
+    filename_getter::get_filename(client, url)
+        .await
+        .map_err(get_error_message_wrap)
 }
 
 #[tauri::command]
@@ -109,15 +119,17 @@ async fn join_paths(first_segment: String, second_segment: String) -> String {
 }
 
 #[tauri::command]
-async fn pause(state: State<'_, AppState>, id: &str) -> Result<(), PauseError> {
+async fn pause(state: State<'_, AppState>, id: &str) -> Result<(), Value> {
     let manager = &state.download_manager;
-    manager.pause(id).await
+    manager.pause(id).await.map_err(get_error_message_wrap)?;
+    Ok(())
 }
 
 #[tauri::command]
-async fn resume(state: State<'_, AppState>, id: &str) -> Result<(), ResumeError> {
+async fn resume(state: State<'_, AppState>, id: &str) -> Result<(), Value> {
     let manager = &state.download_manager;
-    manager.resume(id).await
+    manager.resume(id).await.map_err(get_error_message_wrap)?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

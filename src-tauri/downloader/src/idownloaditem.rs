@@ -5,10 +5,8 @@ use crate::{
     segment::{self, DownloadRunError},
     statuses,
 };
-use async_trait::async_trait;
 use serde::Serialize;
 
-#[async_trait]
 pub trait IRunningDownloadItem: Send + Sync + Any {
     fn get_status(&self) -> Result<statuses::DownloadStatus, segment::DownloadStatusCheckError>;
     fn filename(&self) -> String;
