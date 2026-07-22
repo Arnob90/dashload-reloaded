@@ -1,13 +1,9 @@
-use downloader::download_manager::DownloadStatusGetError;
-use downloader::download_manager::PauseError;
-use downloader::download_manager::ResumeError;
 use downloader::idownloaditem::IDownloadData;
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use downloader::download_manager::DownloadManager;
 use downloader::filename_getter;
 use downloader::get_download_info::get_download_info;
 use downloader::get_download_info::DownloadInfo;
-use downloader::get_download_info::DownloadInfoGetError;
 use downloader::get_error_message::get_error_message;
 use serde::Serialize;
 use serde_json::Value;

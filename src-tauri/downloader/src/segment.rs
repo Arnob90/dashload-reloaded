@@ -66,6 +66,8 @@ pub enum DownloadRunError {
     DirectoryGivenError,
     #[error("Failed to open file")]
     GetFileError(GetFileError),
+    #[error("Failed to merge download segments")]
+    DownloadMergeError,
 }
 
 impl From<reqwest::Error> for DownloadRunError {

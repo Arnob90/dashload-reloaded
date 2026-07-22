@@ -11,10 +11,25 @@ use crate::normal_download_strategies::{
     DownloadStrategy, FullDownloadStrategy, ResumedDownloadStrategy,
 };
 use crate::segment::{self, DownloadRunError};
+use crate::serialize_io_error::serialize_io_error;
 use crate::{length_getter, statuses};
-use std::path::{self, Path};
+use std::path::{self, Path, PathBuf};
 use std::time::Duration;
 use tokio::select;
+
+#[derive(Error, Debug, Serialize)]
+#[serde(tag = "kind", content = "payload")]
+pub enum SerializationError {
+    #[error("Invalid filepath to metadata file: {0:?}")]
+    InvalidMetadataFile(PathBuf),
+    #[error("IO error: {0}")]
+    IOError(
+        #[from]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
+}
+
 #[derive(Error, Debug, Serialize, Clone)]
 #[serde(tag = "kind", content = "payload")]
 pub enum NormalDownloadItemCreationError {
@@ -32,7 +47,10 @@ pub enum NormalDownloadItemCreationError {
     FileChangedOnServer,
     #[error("Failed to get filesize of file to resume")]
     FileSizeGettingError,
+    #[error("Invalid filepath to metadata file")]
+    InvalidFilepath,
 }
+
 pub struct NormalRunningDownloadItem {
     pub url: String,
     pub filepath: path::PathBuf,
@@ -45,10 +63,12 @@ pub struct NormalRunningDownloadItem {
     pub download_strategy: Box<dyn DownloadStrategy>,
 }
 
-#[derive(Debug, Serialize)]
-pub enum NormalDownloadItemErrors {
-    DownloadRunError(DownloadRunError),
-    NormalDownloadItemCreationError(NormalDownloadItemCreationError),
+#[derive(Debug, Serialize, Error)]
+pub enum NormalDownloadItemError {
+    #[error(transparent)]
+    DownloadRunError(#[from] DownloadRunError),
+    #[error(transparent)]
+    NormalDownloadItemCreationError(#[from] NormalDownloadItemCreationError),
 }
 
 impl NormalRunningDownloadItem {
@@ -61,13 +81,13 @@ impl NormalRunningDownloadItem {
         let length = length_getter::get_length(client.clone(), &url).await.ok();
         if filepath.is_dir() {
             return Err(NormalDownloadItemCreationError::DirectoryGivenError(
-                filepath.to_str().unwrap().to_string(),
+                filepath.to_string_lossy().to_string(),
             ));
         }
         filepath
             .file_name()
             .ok_or(NormalDownloadItemCreationError::DirectoryGivenError(
-                filepath.to_str().unwrap().to_string(),
+                filepath.to_string_lossy().to_string(),
             ))?;
         let (sender, reciever) = tokio::sync::watch::channel(statuses::DownloadStatus::Running {
             total: length,
@@ -114,11 +134,16 @@ impl NormalRunningDownloadItem {
     ) -> Result<NormalRunningDownloadItem, NormalDownloadItemCreationError> {
         if filepath.is_dir() {
             return Err(NormalDownloadItemCreationError::DirectoryGivenError(
-                filepath.to_str().unwrap().to_string(),
+                filepath.to_string_lossy().to_string(),
             ));
         }
-        let required_metadata_filename =
-            format!("{}.json", filepath.file_name().unwrap().to_str().unwrap());
+        let required_metadata_filename = format!(
+            "{}.json",
+            filepath
+                .file_name()
+                .ok_or(NormalDownloadItemCreationError::InvalidFilepath)?
+                .to_string_lossy()
+        );
         let metadata_path =
             path::Path::join(filepath.parent().unwrap(), required_metadata_filename);
         let deserialized_data_txt = fs::read_to_string(metadata_path)
@@ -227,16 +252,21 @@ impl NormalRunningDownloadItem {
         let _ = required_sender.send(statuses::DownloadStatus::Completed);
         Ok(())
     }
-    async fn serialize(&self) -> Result<(), std::io::Error> {
+    async fn serialize(&self) -> Result<(), SerializationError> {
         let required_data = self.get_download_data();
-        let filename = self.filepath.file_name().unwrap();
+        let filename = self
+            .filepath
+            .file_name()
+            .ok_or(SerializationError::InvalidMetadataFile(
+                self.filepath.clone(),
+            ))?;
         let to_serialize_to = format!("{}.json", filename.to_str().unwrap());
         let serialized = serde_json::to_string_pretty(&required_data).unwrap();
-        fs::write(
+        Ok(fs::write(
             path::Path::join(self.filepath.parent().unwrap(), to_serialize_to),
             serialized,
         )
-        .await
+        .await?)
     }
     async fn start_internal(&self) -> Result<(), DownloadRunError> {
         let err_maybe = self.start_helper().await;

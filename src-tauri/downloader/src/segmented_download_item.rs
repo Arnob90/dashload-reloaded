@@ -12,12 +12,13 @@ use crate::{
 use futures::future::join_all;
 use getset;
 use getset::{CloneGetters, Getters};
+use log::warn;
 use reqwest::{self};
 use serde::Serialize;
 use std::path::{self, Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::{fs, io::AsyncWriteExt};
+use tokio::fs;
 
 #[derive(Getters, CloneGetters)]
 pub struct SegmentedRunningDownloadItem {
@@ -47,6 +48,8 @@ pub enum DownloadSerializedError {
     SerializationError(String),
     #[error("Failed to write download data to disk. Reason: {0}")]
     WriteError(String),
+    #[error("The filepath of download is wrong: {0:?}")]
+    InvalidFilepathError(PathBuf),
 }
 impl From<serde_json::Error> for DownloadSerializedError {
     fn from(err: serde_json::Error) -> Self {
@@ -186,7 +189,7 @@ impl SegmentedRunningDownloadItem {
         let filepath_to_download = &filepath;
         filepath_to_download.file_name().ok_or(
             SegmentedDownloadItemCreationError::InvalidFilepathError(
-                filepath.to_str().unwrap().to_string(),
+                filepath.to_string_lossy().to_string(),
             ),
         )?;
         let data = fs::read_to_string(metadata_path).await.unwrap();
@@ -240,7 +243,10 @@ impl SegmentedRunningDownloadItem {
     pub async fn serialize_data(&self) -> Result<(), DownloadSerializedError> {
         let to_serialize = self.get_download_data();
         //There must be a filename or something has gone horribly wrong!!
-        let filename = self.filepath.file_name().unwrap();
+        let filename = self
+            .filepath
+            .file_name()
+            .ok_or_else(|| DownloadSerializedError::InvalidFilepathError(self.filepath.clone()))?;
         let to_serialize_to = format!("{}.json", filename.to_str().unwrap());
         let serialized = serde_json::to_string_pretty(&to_serialize)?;
         fs::write(
@@ -281,10 +287,33 @@ impl SegmentedRunningDownloadItem {
             .write(true)
             .open(filepath_to_merge_to)
             .await?;
+        let mut merge_err = false;
         for segment in &self.segments_to_run {
-            let data_read = fs::read(&segment.data.filepath).await?;
-            final_file.write_all(&data_read).await?;
-            fs::remove_file(&segment.data.filepath).await?;
+            let segment_file_maybe = fs::File::open(&segment.data.filepath).await;
+            if let Ok(mut segment_file) = segment_file_maybe {
+                let res = tokio::io::copy(&mut segment_file, &mut final_file).await;
+                if res.is_err() {
+                    merge_err = true;
+                    break;
+                }
+            } else {
+                merge_err = true;
+                break;
+            }
+        }
+        for segment in &self.segments_to_run {
+            //For now, let's delete the temporary files for simplicity
+            //TODO: Add a reattempt merge feat
+            let res = fs::remove_file(&segment.data.filepath).await;
+            if res.is_err() {
+                warn!(
+                    "Failed to clean up temporary file {0:?}",
+                    segment.data.filepath
+                )
+            }
+        }
+        if merge_err {
+            return Err(DownloadRunError::DownloadMergeError);
         }
         let _ = status_sender.send(DownloadStatus::Completed);
         Ok(())
