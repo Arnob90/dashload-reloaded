@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 pub mod download_data;
 pub mod download_data_factory;
 pub mod download_item;
@@ -12,9 +11,6 @@ pub mod info_getters;
 pub mod length_getter;
 pub mod message_pass;
 pub mod misc;
-mod normal_download_strategies;
-pub mod segment;
 pub mod segmented_verifier;
-mod segmenter;
 pub mod serialize_io_error;
 pub mod statuses;

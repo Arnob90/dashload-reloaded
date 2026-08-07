@@ -149,8 +149,7 @@ impl InPlaceSegment {
             .create(true)
             .truncate(false)
             .open(&self.data.filepath)
-            .await
-            .map_err(|_| DownloadRunError::FileOpenError(self.data.filepath.clone()))?;
+            .await?;
         file.seek(std::io::SeekFrom::Start(
             self.data.info.as_ref().map(|i| i.start).unwrap_or(0) + self.data.last_downloaded,
         ))
@@ -163,9 +162,13 @@ impl InPlaceSegment {
         let mut res = req.send().await?;
         let status = res.status();
         if range_header.is_some() && status != StatusCode::PARTIAL_CONTENT {
-            return Err(DownloadRunError::ServerNotRangable);
+            return Err(DownloadRunError::ServerError(
+                "Server does not support range requests".to_owned(),
+            ));
         } else if !status.is_success() {
-            return Err(DownloadRunError::ServerNotAvailable);
+            return Err(DownloadRunError::NetworkError(
+                "Server is unavailable".to_owned(),
+            ));
         }
         let polling_time = Duration::from_millis(self.polling_rate);
         let mut last_update = Instant::now();

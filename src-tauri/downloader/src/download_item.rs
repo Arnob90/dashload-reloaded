@@ -1,22 +1,16 @@
 use crate::download_data::DownloadData;
 use crate::download_run_error::DownloadRunError;
 use crate::download_status::{DownloadState, DownloadStatus};
-use crate::in_place_segment::{InPlaceSegment, InPlaceSegmentData, SegmentCommand, SegmentInfo};
+use crate::in_place_segment::{InPlaceSegment, SegmentCommand};
 use futures::future::join_all;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use thiserror::Error;
 use tokio::fs;
 use tokio::sync::watch;
 
 pub enum CreateOpts {
     Segmented { num_segments: u64, filesize: u64 },
     Normal,
-}
-#[derive(Error, Debug)]
-enum DownloadItemCreationError {
-    #[error("Given download data is invalid")]
-    InvalidData,
 }
 pub struct DownloadItem {
     pub segments: Vec<InPlaceSegment>,
@@ -28,34 +22,6 @@ pub struct DownloadItem {
 }
 
 impl DownloadItem {
-    /// Helper to divide file into segments pointing to the SAME target file
-    fn divide_into_segments(
-        length: u64,
-        num_segments: u64,
-        url: &str,
-        filepath: &Path,
-    ) -> Vec<InPlaceSegmentData> {
-        let num_segments = num_segments.max(1); // Prevent division by zero
-        let chunk_size = length / num_segments;
-        let mut segments = Vec::new();
-
-        for i in 0..num_segments {
-            let start = i * chunk_size;
-            let end = if i == num_segments - 1 {
-                length - 1
-            } else {
-                (i + 1) * chunk_size - 1
-            };
-
-            segments.push(InPlaceSegmentData {
-                url: url.to_string(),
-                filepath: filepath.to_path_buf(),
-                last_downloaded: 0,
-                info: Some(SegmentInfo { start, end }),
-            });
-        }
-        segments
-    }
     pub async fn create_from_data(
         client: reqwest::Client,
         data: DownloadData,

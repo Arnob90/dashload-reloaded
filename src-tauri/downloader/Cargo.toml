@@ -6,26 +6,19 @@ edition = "2024"
 [dependencies]
 async-trait = "0.1.91"
 bytes = "1.12.1"
-console-subscriber = "0.5.0"
 content_disposition = "0.4.0"
 dashmap = "6.1.0"
-env_logger = "0.11.8"
-fs2 = "0.4.3"
 futures = "0.3.31"
-getset = "0.1.6"
-log = "0.4.28"
-reqwest = "0.12.23"
-serde = "1.0.228"
+reqwest = "0.13"
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 thiserror = "2.0.17"
 tokio = { version = "1.47.1", features = ["full", "tracing"] }
-tokio-util = "0.7.19"
 url = "2.5.7"
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [dev-dependencies]
-crossterm = "0.29.0"
-env_logger = "0.11.8"
 log = "0.4.28"
 test-log = "0.2.18"
 wiremock = "0.6.5"
+console-subscriber = "0.5.0"

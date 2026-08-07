@@ -1,6 +1,3 @@
-use std::path::PathBuf;
-
-use crate::normal_download_strategies::GetFileError;
 use reqwest::{self};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -12,34 +9,33 @@ pub enum GetFilePathError {
 #[derive(Debug, Error, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum DownloadRunError {
-    #[error("Request failed! Reason: {0}")]
-    RequestError(String),
-    #[error("The server does not have a concept of filesize")]
-    LengthlessServerError,
-    #[error("Given range is out of range")]
-    RangeError,
-    #[error("The server violates basic protocols")]
-    IllBehavedServer,
-    #[error("The server does not support range requests")]
-    ServerNotRangable,
-    #[error("Invalid header value")]
-    InvalidHeaderValue, // New variant for the parse error
-    #[error("Failed to open file {0:?}")]
-    FileOpenError(PathBuf),
-    #[error("Failed to seek file")]
-    ServerNotAvailable,
-    #[error("Failed to seek file")]
-    FileSeekError,
-    #[error("Cannot open file to write error, reason: {0}")]
-    FileWriteError(String),
-    #[error("Download cannot be run twice")]
+    /// Action: Check internet connection or retry
+    #[error("Network error: {0}")]
+    NetworkError(String),
+
+    /// Action: Server rejected range requests, 404, 500, etc.
+    #[error("Server error: {0}")]
+    ServerError(String),
+
+    /// Action: Check disk space, file permissions, or path
+    #[error("Disk I/O error: {0}")]
+    DiskError(String),
+
+    /// Action: Internal state error
+    #[error("Download is already running")]
     AlreadyRunning,
-    #[error("The file does not match the one kept before resumption")]
-    FileMismatch,
-    #[error("Given path is one to a dir")]
-    DirectoryGivenError,
-    #[error("Failed to open file")]
-    GetFileError(GetFileError),
-    #[error("Failed to merge download segments")]
-    DownloadMergeError,
+}
+
+// Automatic conversion for all std::io::Error (open, seek, write, flush, remove)
+impl From<std::io::Error> for DownloadRunError {
+    fn from(err: std::io::Error) -> Self {
+        Self::DiskError(err.to_string())
+    }
+}
+
+// Automatic conversion for reqwest network errors
+impl From<reqwest::Error> for DownloadRunError {
+    fn from(err: reqwest::Error) -> Self {
+        Self::NetworkError(err.to_string())
+    }
 }
