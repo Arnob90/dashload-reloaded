@@ -1,6 +1,5 @@
+use crate::download_run_error::DownloadRunError;
 use serde::Serialize;
-
-use crate::segment::DownloadRunError;
 #[derive(Clone, PartialEq, Debug, Serialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum DownloadStatus {

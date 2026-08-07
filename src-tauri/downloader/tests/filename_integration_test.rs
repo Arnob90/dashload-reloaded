@@ -2,7 +2,7 @@
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 // Import the function you want to test from your library crate
-use downloader::filename_getter::get_filename;
+use downloader::info_getters::get_filename;
 use log::info;
 
 #[tokio::test]
@@ -114,6 +114,6 @@ async fn test_error_when_no_filename_can_be_found() {
     // `matches!` is a great way to check the specific error variant.
     assert!(matches!(
         result.unwrap_err(),
-        downloader::filename_getter::FilepathGettingError::Filenameless
+        downloader::info_getters::FilepathGettingError::Filenameless
     ));
 }

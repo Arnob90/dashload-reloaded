@@ -57,3 +57,12 @@ pub async fn get_filename(
     }
     Err(FilepathGettingError::Filenameless)
 }
+
+pub async fn get_filesize(client: reqwest::Client, url: &str) -> Option<u64> {
+    client
+        .head(url)
+        .send()
+        .await
+        .ok()
+        .and_then(|r| r.content_length())
+}

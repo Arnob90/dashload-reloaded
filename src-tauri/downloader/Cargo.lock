@@ -462,6 +462,7 @@ name = "downloader"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "console-subscriber",
  "content_disposition",
  "crossterm",
@@ -477,6 +478,7 @@ dependencies = [
  "test-log",
  "thiserror",
  "tokio",
+ "tokio-util",
  "url",
  "uuid",
  "wiremock",

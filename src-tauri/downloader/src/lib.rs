@@ -1,21 +1,20 @@
 #![allow(dead_code)]
 pub mod download_data;
+pub mod download_data_factory;
+pub mod download_item;
 pub mod download_manager;
-pub mod downloaditem;
-pub mod filename_getter;
+pub mod download_run_error;
+pub mod download_status;
 pub mod get_download_info;
 pub mod get_error_message;
-pub mod idownloaditem;
+pub mod in_place_segment;
+pub mod info_getters;
 pub mod length_getter;
 pub mod message_pass;
 pub mod misc;
-pub mod normal_download_item;
 mod normal_download_strategies;
-pub mod resume_download_factory;
 pub mod segment;
-pub mod segmented_download_item;
 pub mod segmented_verifier;
 mod segmenter;
 pub mod serialize_io_error;
 pub mod statuses;
-pub mod terminal_download_item;

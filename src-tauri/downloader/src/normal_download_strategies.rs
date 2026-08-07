@@ -1,7 +1,7 @@
-use crate::segment::DownloadRunError;
+use crate::download_run_error::DownloadRunError;
 use fs2::FileExt;
 use reqwest::{Response, StatusCode};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -9,7 +9,7 @@ use thiserror::Error;
 use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
 
-#[derive(Error, Debug, Serialize, Clone, PartialEq)]
+#[derive(Error, Debug, Serialize, Clone, PartialEq, Deserialize)]
 pub enum GetFileError {
     #[error("Cannot create the file!")]
     Creation,
