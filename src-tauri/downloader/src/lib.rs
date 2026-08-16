@@ -12,5 +12,5 @@ pub mod length_getter;
 pub mod message_pass;
 pub mod misc;
 pub mod segmented_verifier;
+pub mod serialization_error;
 pub mod serialize_io_error;
-pub mod statuses;

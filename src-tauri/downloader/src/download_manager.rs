@@ -1,13 +1,18 @@
+use crate::download_data::DownloadData;
 use crate::download_data_factory::DownloadDataFactory;
 use crate::download_item::DownloadItem;
+use crate::download_status::DownloadState;
 use crate::download_status::DownloadStatus;
 use crate::info_getters;
+use crate::serialization_error::DataSerializationError;
 use dashmap::DashMap;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::fs;
 use uuid::Uuid;
 
 #[derive(Debug, Error, Clone, Serialize)]
@@ -36,6 +41,24 @@ impl DownloadManager {
             poll_every_ms,
             client,
         }
+    }
+
+    pub async fn reconstruct(
+        client: reqwest::Client,
+        poll_every_ms: u64,
+        datas: HashMap<String, DownloadData>,
+    ) -> Result<DownloadManager, ManagerError> {
+        let manager = DownloadManager::new(client.clone(), poll_every_ms);
+        for (id, data) in datas {
+            let item = DownloadItem::create_from_data(client.clone(), data, poll_every_ms)
+                .await
+                .map_err(|e| ManagerError::DownloadCreationError(e.to_string()))?;
+            manager.download_items.insert(id, item.clone());
+            tokio::spawn(async move {
+                let _ = item.start().await;
+            });
+        }
+        Ok(manager)
     }
 
     pub async fn add_normal_download(
@@ -86,11 +109,15 @@ impl DownloadManager {
 
     /// Resumes a paused download from its saved state
     pub async fn resume(&self, id: &str) -> Result<(), ManagerError> {
-        let item = self
-            .download_items
-            .get(id)
-            .ok_or(ManagerError::IdDoesNotExist)?;
-        let item_data = item.snapshot_data();
+        let mut item_data = {
+            self.download_items
+                .get(id)
+                .ok_or(ManagerError::IdDoesNotExist)?
+                .snapshot_data()
+        };
+        item_data.state = DownloadState::Running {
+            download_speed: 0.0,
+        };
         let new_item =
             DownloadItem::create_from_data(self.client.clone(), item_data, self.poll_every_ms)
                 .await
@@ -133,5 +160,20 @@ impl DownloadManager {
             status_map.insert(id, item.get_status());
         }
         status_map
+    }
+    pub fn get_full_snapshot(&self) -> HashMap<String, DownloadData> {
+        let mut req = HashMap::new();
+        for entry in self.download_items.iter() {
+            let id = entry.key();
+            let data = entry.value().snapshot_data();
+            req.insert(id.clone(), data);
+        }
+        req
+    }
+    pub async fn save_session(&self, to_save_to: &Path) -> Result<(), DataSerializationError> {
+        let snapshot = self.get_full_snapshot();
+        let json_str = serde_json::to_string(&snapshot)?;
+        fs::write(&to_save_to, json_str).await?;
+        Ok(())
     }
 }

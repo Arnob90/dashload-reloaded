@@ -9,11 +9,14 @@ bytes = "1.12.1"
 content_disposition = "0.4.0"
 dashmap = "6.1.0"
 futures = "0.3.31"
+hex = "0.4.3"
+log = "0.4.28"
 reqwest = "0.13"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+sha2 = "0.11.0"
 thiserror = "2.0.17"
-tokio = { version = "1.47.1", features = ["full", "tracing"] }
+tokio = { version = "1.47.1", features = ["full"] }
 url = "2.5.7"
 uuid = { version = "1.18.1", features = ["v4"] }
 
@@ -21,4 +24,3 @@ uuid = { version = "1.18.1", features = ["v4"] }
 log = "0.4.28"
 test-log = "0.2.18"
 wiremock = "0.6.5"
-console-subscriber = "0.5.0"

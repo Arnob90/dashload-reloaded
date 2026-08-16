@@ -1,6 +1,5 @@
 use downloader::download_manager::DownloadManager;
 use downloader::download_status::DownloadState;
-use log::info;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -14,8 +13,7 @@ fn temp_filepath(prefix: &str) -> PathBuf {
 }
 
 /// Test 1: Segmented Download Progress (N = 4)
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn test_segmented_download_progress() {
     let client = reqwest::Client::new();
     let manager = DownloadManager::new(client, 200);
@@ -30,16 +28,17 @@ async fn test_segmented_download_progress() {
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
     let status = manager.get_item_status(&id).unwrap();
-    info!(
+    log::info!(
         "Segmented Progress: {} / {:?}",
-        status.downloaded, status.total
+        status.downloaded,
+        status.total
     );
 
     assert!(
         status.downloaded > 0,
         "Downloaded bytes should be greater than 0"
     );
-    assert!(matches!(status.status, DownloadState::Running { .. }));
+    assert!(matches!(status.state, DownloadState::Running { .. }));
 
     // Clean up
     let _ = manager.pause(&id);
@@ -47,8 +46,7 @@ async fn test_segmented_download_progress() {
 }
 
 /// Test 2: Pause and Resume Lifecycle
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn test_pause_and_resume_lifecycle() {
     let client = reqwest::Client::new();
     let manager = DownloadManager::new(client, 200);
@@ -67,8 +65,8 @@ async fn test_pause_and_resume_lifecycle() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let status_after_pause = manager.get_item_status(&id).unwrap();
-    info!("Status after pause: {:?}", status_after_pause.status);
-    assert_eq!(status_after_pause.status, DownloadState::Paused);
+    log::info!("Status after pause: {:?}", status_after_pause.state);
+    assert_eq!(status_after_pause.state, DownloadState::Paused);
 
     let downloaded_at_pause = status_after_pause.downloaded;
 
@@ -77,11 +75,11 @@ async fn test_pause_and_resume_lifecycle() {
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
     let status_after_resume = manager.get_item_status(&id).unwrap();
-    info!("Status after resume: {:?}", status_after_resume.status);
+    log::info!("Status after resume: {:?}", status_after_resume.state);
 
     // Verify state is Running again and downloaded bytes continued from offset
     assert!(matches!(
-        status_after_resume.status,
+        status_after_resume.state,
         DownloadState::Running { .. }
     ));
     assert!(
@@ -94,9 +92,7 @@ async fn test_pause_and_resume_lifecycle() {
     let _ = tokio::fs::remove_file(&path).await;
 }
 
-/// Test 3: Single Stream Fallback (N = 1)
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn test_single_stream_download() {
     let client = reqwest::Client::new();
     let manager = DownloadManager::new(client, 200);
@@ -110,7 +106,7 @@ async fn test_single_stream_download() {
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
     let status = manager.get_item_status(&id).unwrap();
-    info!("Single stream progress: {} bytes", status.downloaded);
+    log::info!("Single stream progress: {} bytes", status.downloaded);
     assert!(status.downloaded > 0);
 
     // Clean up

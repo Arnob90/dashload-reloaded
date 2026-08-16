@@ -14,5 +14,5 @@ pub enum DownloadState {
 pub struct DownloadStatus {
     pub total: Option<u64>,
     pub downloaded: u64,
-    pub status: DownloadState,
+    pub state: DownloadState,
 }

@@ -1,46 +1,29 @@
-import { AddDownloadUrl } from "./addDownloadUrl";
 import { useState } from "react";
+import { Modal } from "@mantine/core";
 import { DownloadInfo } from "../../code/typesOfBackend";
+import { AddDownloadUrl } from "./addDownloadUrl";
 import { RunDownloadDialog } from "./runDownload";
-import { getDownloadInfo } from "../../code/getDownloadInfo";
-import { notifications } from "@mantine/notifications";
 
 interface AddDownloadProps {
-    open: boolean
-    onOpenStateChangeRequested: (open: boolean) => void
+    opened: boolean,
+    onClose: () => void
 }
 
-export function AddDownload({ open, onOpenStateChangeRequested }: AddDownloadProps) {
+export function AddDownload({ opened, onClose }: AddDownloadProps) {
     const [currentMetadata, setMetadata] = useState<DownloadInfo | undefined>()
-    const [loading, setLoading] = useState(false)
-    const submit = async (url: string) => {
-        setLoading(true)
-        const info = await getDownloadInfo(url)
-        if ("kind" in info) {
-            console.log(info.kind)
-            notifications.show({
-                message: info.payload,
-                title: "Error",
-            })
-        }
-        else {
-            setMetadata(info)
-        }
-    }
-    const setOpenIntermediate = (toSetTo: boolean) => {
-        if (!toSetTo) {
-            setMetadata(undefined)
-            setLoading(false)
-        }
-        onOpenStateChangeRequested(toSetTo)
-    }
+    console.log("I am rerendering")
     return (
-        currentMetadata === undefined ? (
-            <AddDownloadUrl onOpenStateChangeRequested={setOpenIntermediate} open={open} submitMetadata={submit} loading={loading} />
-        ) :
-            (
-                <RunDownloadDialog metadata={currentMetadata} open={open} onOpenStateChangeRequested={setOpenIntermediate} />
-            )
-
+        <Modal
+            opened={opened}
+            onClose={onClose}
+            title="Add Download"
+            pos={"relative"}
+        >
+            {currentMetadata === undefined ? (
+                <AddDownloadUrl submitMetadata={setMetadata} />
+            ) : (
+                <RunDownloadDialog metadata={currentMetadata} onSuccess={onClose} />
+            )}
+        </Modal>
     )
 }

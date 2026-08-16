@@ -1,31 +1,37 @@
-import { Modal, Input, Text, Flex, LoadingOverlay, Box, Button } from "@mantine/core";
-import { DownloadInfoGetError, DownloadInfo } from "../../code/typesOfBackend";
+import { Input, Text, Flex, LoadingOverlay, Button } from "@mantine/core";
+import { DownloadInfo, DownloadInfoGetError, DownloadInfoGetErrorSchema } from "../../code/typesOfBackend";
 import { useState } from "react";
+import { useFetchMetadata } from "../../code/useDownloads";
+import { notifications } from "@mantine/notifications";
 export interface AddDownloadProps {
-    open: boolean,
-    onOpenStateChangeRequested: (open: boolean) => void
-    loading: boolean,
     error?: DownloadInfoGetError,
-    submitMetadata?: (url: string) => void;
+    submitMetadata?: (info: DownloadInfo) => void;
 }
 
-export function AddDownloadUrl({ open, onOpenStateChangeRequested, submitMetadata, loading, error: err }: AddDownloadProps) {
+export function AddDownloadUrl({ submitMetadata, error: err }: AddDownloadProps) {
     const [url, setUrl] = useState("");
+    const getDownloadMetadataMutation = useFetchMetadata()
+    const submit = async () => {
+        try {
+            const metadata = await getDownloadMetadataMutation.mutateAsync(url)
+            submitMetadata?.(metadata)
+        }
+        catch (err) {
+            const errParsed = DownloadInfoGetErrorSchema.parse(err)
+            notifications.show({
+                title: "Download Failed",
+                message: `Failed to get information. Kind:${errParsed.kind} ,Reason: ${errParsed.message}`
+            })
+        }
+    }
     return (
-        <Modal
-            opened={open}
-            onClose={() => {
-                onOpenStateChangeRequested(false);
-            }}
-            title="Add Download"
-            pos={"relative"}
-        >
-            <LoadingOverlay visible={loading} zIndex={1000} overlayProps={{ radius: "sm", blur: 2 }}>
+        <>
+            <LoadingOverlay visible={getDownloadMetadataMutation.isPending} zIndex={1000} overlayProps={{ radius: "sm", blur: 2 }}>
             </LoadingOverlay>
             <form
                 onSubmit={(e) => {
                     e.preventDefault();
-                    submitMetadata?.(url);
+                    submit()
                 }}
             >
                 <Flex direction="column" gap="xs">
@@ -34,6 +40,6 @@ export function AddDownloadUrl({ open, onOpenStateChangeRequested, submitMetadat
                     <Button type="submit">Download</Button>
                 </Flex>
             </form>
-        </Modal>
+        </>
     )
 }

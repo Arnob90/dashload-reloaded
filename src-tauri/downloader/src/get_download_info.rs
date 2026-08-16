@@ -37,7 +37,7 @@ pub async fn get_download_info(
     Url::parse(url)?;
     client.get(url).send().await?;
     let length_maybe_future = length_getter::get_length(client.clone(), url);
-    let filename_future = info_getters::get_filename(client.clone(), url);
+    let filename_future = info_getters::get_filename_from_url(client.clone(), url);
     let (length_res, filename_res) = tokio::join!(length_maybe_future, filename_future);
     let length_maybe = length_res.ok();
     let filename = filename_res.ok();

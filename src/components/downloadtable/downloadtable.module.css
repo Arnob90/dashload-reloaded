@@ -1,24 +1,40 @@
-/* MyTable.module.css */
-
+/* Base Row */
 .table_row {
-	/* Add a transition for a smooth effect */
 	transition: background-color 0.15s ease-in-out;
 	cursor: pointer;
+	outline: none;
 }
 
-.table_row:hover {
-	/* A subtle hover effect is good UX */
-	background-color: rgba(255, 255, 255, 0.05);
+/* Hover state */
+.table_row:hover td {
+	background-color: var(--mantine-color-dark-6);
 }
 
-.selected_row {
-	/* You can still have the hover effect */
-	background-color: rgba(0, 200, 255, 0.2);
+/* 1. Permanently remove browser focus rings on all states */
+.table_row:focus,
+.table_row:focus-visible,
+.selected_row:focus,
+.selected_row:focus-visible {
+	outline: none !important;
+}
+
+/* 2. Style selected row cleanly across all table cells */
+.selected_row td {
+	background-color: var(--mantine-color-dark-5) !important;
 	cursor: pointer;
+}
 
-	/* --- The Magic Trick --- */
-	/* We create a huge, red, semi-transparent shadow that is drawn
-     INSIDE the element's bounds. This creates the overlay effect
-     without needing any pseudo-elements or positioning hacks. */
-	box-shadow: inset 0 0 0 9999px rgba(255, 0, 0, 0.4);
+.delete_menu_item {
+	color: var(--mantine-color-red-5);
+	transition: background-color 100ms ease, color 100ms ease;
+}
+
+/* When hovered: crisp red background with pure white text and icon */
+.delete_menu_item:hover {
+	background-color: var(--mantine-color-red-7) !important;
+	color: #ffffff !important;
+}
+
+.delete_menu_item:hover svg {
+	stroke: #ffffff !important;
 }

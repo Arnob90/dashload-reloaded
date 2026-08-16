@@ -24,31 +24,46 @@ pub struct DownloadItem {
 impl DownloadItem {
     pub async fn create_from_data(
         client: reqwest::Client,
-        data: DownloadData,
+        mut download_data: DownloadData,
         polling_rate_ms: u64,
     ) -> Result<Arc<Self>, Box<dyn std::error::Error>> {
         // 1. Pre-allocate target file on disk if filesize is known
-        let is_fresh = data.segments.iter().map(|s| s.last_downloaded).sum::<u64>() == 0u64;
+        let file_exists = tokio::fs::metadata(&download_data.filepath).await.is_ok();
+        let has_progress = download_data.segments.iter().any(|s| s.last_downloaded > 0);
+        let is_fresh = !file_exists || !has_progress;
+        if is_fresh {
+            for segment in download_data.segments.iter_mut() {
+                segment.last_downloaded = 0;
+            }
+        }
         let file = fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(is_fresh)
-            .open(&data.filepath)
+            .open(&download_data.filepath)
             .await?;
-        if let Some(filesize) = data.length {
+        if let Some(filesize) = download_data.length
+            && is_fresh
+        {
             file.set_len(filesize).await?;
         }
 
         // 2. Generate segment data definitions
-        let segment_datas = data.segments;
+        let segment_datas = download_data.segments;
         // 3. Initialize InPlaceSegments and collect their receivers
         let mut segments = Vec::new();
         let mut status_receivers = Vec::new();
         let (segment_commander, reciever) = watch::channel(SegmentCommand::Nothing);
         for data in segment_datas {
             let req_reciever = reciever.clone();
-            let (segment, rx) =
-                InPlaceSegment::new(client.clone(), data, polling_rate_ms, req_reciever).await?;
+            let (segment, rx) = InPlaceSegment::new(
+                client.clone(),
+                data,
+                polling_rate_ms,
+                req_reciever,
+                download_data.state.clone(),
+            )
+            .await?;
             segments.push(segment);
             status_receivers.push(rx);
         }
@@ -56,8 +71,8 @@ impl DownloadItem {
         let item = Arc::new(Self {
             segments,
             status_receivers,
-            filepath: data.filepath,
-            url: data.url,
+            filepath: download_data.filepath,
+            url: download_data.url,
             polling_rate_ms,
             segment_command_sender: segment_commander,
         });
@@ -105,7 +120,7 @@ impl DownloadItem {
                 total_filesize = None;
             }
 
-            match &status.status {
+            match &status.state {
                 DownloadState::Running { download_speed } => {
                     total_speed += download_speed;
                     all_completed = false;
@@ -145,7 +160,7 @@ impl DownloadItem {
         DownloadStatus {
             total: total_filesize,
             downloaded: total_downloaded,
-            status: overall_state,
+            state: overall_state,
         }
     }
 
@@ -160,6 +175,7 @@ impl DownloadItem {
                 .iter()
                 .map(|segment| segment.snapshot())
                 .collect(),
+            state: self.get_status().state,
         }
     }
 

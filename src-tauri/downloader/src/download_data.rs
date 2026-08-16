@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 
-use crate::in_place_segment::InPlaceSegmentData;
+use crate::{download_status::DownloadState, in_place_segment::InPlaceSegmentData};
 use serde::{Deserialize, Serialize};
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DownloadData {
     pub url: String,
     pub filepath: PathBuf,
     pub segments: Vec<InPlaceSegmentData>,
     pub length: Option<u64>,
+    pub state: DownloadState,
 }

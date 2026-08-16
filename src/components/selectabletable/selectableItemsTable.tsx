@@ -24,7 +24,7 @@ export function SelectableItemsTable({ children, setSelectedId, ...rest }: Selec
             if (e.target === e.currentTarget) {
                 setSelectedId(null)
             }
-        }} w={"100%"} h={"100%"} direction={"column"}>
+        }} w={"100%"} h={"100%"} direction="column" flex="1">
             <Table {...rest} className={styles.item}>
                 {children}
             </Table>

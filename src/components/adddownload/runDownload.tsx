@@ -1,94 +1,130 @@
-import { Modal, Box, TextInput, Flex, ActionIcon, Button, Text, LoadingOverlay, NumberInput } from "@mantine/core";
-import { DownloadInfo, NormalDownloadItemCreationError, SegmentItemDownloadItemCreationError } from "../../code/typesOfBackend";
+import { Box, TextInput, Flex, ActionIcon, Button, LoadingOverlay, NumberInput } from "@mantine/core";
 import { useState } from "react";
 import { Folder } from "lucide-react";
-import { CollapsibleSection } from "./extraOptions";
-import { chooseFolder } from "../../code/chooseFolder";
-import { joinPaths } from "../../code/joinPath.ts";
-import { startDownload, startDownloadSegmented } from "../../code/download.ts"
+import { MoreInfo } from "./moreInfo.tsx";
+import { useAddDownload, useOpenFile } from "../../code/useDownloads.ts";
+import { DownloadInfo } from "../../code/typesOfBackend.ts";
+import { joinPaths } from "../../code/utils.ts";
 import { notifications } from "@mantine/notifications";
 
 export interface RunDownloadDialogProps {
-    metadata: DownloadInfo,
-    open: boolean,
-    onOpenStateChangeRequested: (open: boolean) => void
+    metadata: DownloadInfo;
+    onSuccess?: () => void;
 }
 
-export function RunDownloadDialog({ metadata, open, onOpenStateChangeRequested }: RunDownloadDialogProps) {
-    const [filepathToDownloadTo, setFilepathToDownloadTo] = useState("")
-    const [filename, setFilename] = useState(metadata.filename ?? "")
-    const [loading, setLoading] = useState(false)
-    const [numberOfSegments, setNumberOfSegments] = useState(metadata.segmented_possible ? 3 : 1)
-    const chooseFolderByPrompt = async () => {
-        const filepathChoosen = await chooseFolder()
-        if (filepathChoosen === null) {
-            return
-        }
-        setFilepathToDownloadTo(filepathChoosen)
-    }
-    const startDownloadNow = async () => {
-        const combinedFilepath = await joinPaths(filepathToDownloadTo, filename)
-        console.log(combinedFilepath)
-        setLoading(true)
-        let res: NormalDownloadItemCreationError | SegmentItemDownloadItemCreationError | undefined = undefined
-        if (numberOfSegments === 1) {
-            res = await startDownload(metadata.url, combinedFilepath)
-        }
-        else {
-            res = await startDownloadSegmented(metadata.url, combinedFilepath, numberOfSegments)
-        }
-        if (res !== undefined) {
-            notifications.show({
-                message: res.payload,
-                title: "Error",
-            })
-        }
-        setLoading(false)
-        onOpenStateChangeRequested(false)
-    }
-    return (
-        <Modal opened={open} onClose={() => { onOpenStateChangeRequested(false) }} title="Download Info" pos={"relative"}>
-            <LoadingOverlay visible={loading} zIndex={1000} overlayProps={{ radius: "sm", blur: 2 }} />
-            <form onSubmit={(e) => {
-                e.preventDefault()
-                startDownloadNow()
-            }}>
-                <Flex direction={"column"} w={"100%"} gap={0.5}>
-                    <TextInput value={filename} placeholder="Filename" onChange={(event) => setFilename(event.target.value)} />
-                    <Flex my={"sm"} w={"100%"} gap={"sm"}>
-                        <TextInput value={filepathToDownloadTo} onChange={(event) => {
-                            setFilepathToDownloadTo(event.target.value)
-                        }} placeholder="Filepath" w={"100%"} />
-                        <ActionIcon size={"5vh"} color="gray" onClick={chooseFolderByPrompt}>
-                            <Folder color="#9c9c9c" />
-                        </ActionIcon>
-                    </Flex>
-                    <Button type="submit">Start Download</Button>
-                    <CollapsibleSection optionText="Info">
-                        <Flex bg={"dark"} direction={"column"}>
-                            <Box m={"sm"}>
-                                <Text>Filename: {metadata.filename}</Text>
-                                <Text>Filesize: {metadata.filesize}</Text>
-                                <Text>Segmented: {metadata.segmented_possible ? "Yes" : "No"}</Text>
-                            </Box>
-                        </Flex>
-                    </CollapsibleSection>
-                    <CollapsibleSection optionText="Advanced Options">
-                        <Box m={"sm"} bg={"dark"}>
-                            <Text>Number of Segments</Text>
-                            <NumberInput min={1} max={100} disabled={!metadata.segmented_possible} value={numberOfSegments} onChange={(num) => {
-                                if (typeof num === "string") {
-                                    const parsed = Number(num)
-                                    setNumberOfSegments(parsed)
-                                    return
-                                }
-                                setNumberOfSegments(num)
+export function RunDownloadDialog({ metadata, onSuccess }: RunDownloadDialogProps) {
+    const [filepathToDownloadTo, setFilepathToDownloadTo] = useState("");
+    const [filename, setFilename] = useState(metadata.filename ?? "");
+    const [numberOfSegments, setNumberOfSegments] = useState(metadata.segmented_possible ? 4 : 1);
 
-                            }}></NumberInput>
-                        </Box>
-                    </CollapsibleSection>
+    const openFileMutation = useOpenFile();
+    const addDownload = useAddDownload();
+
+    const chooseFolderByPrompt = async () => {
+        try {
+            const folderPath = await openFileMutation.mutateAsync();
+            if (folderPath) {
+                setFilepathToDownloadTo(folderPath);
+            }
+        } catch (err) {
+            notifications.show({
+                title: "Folder Selection",
+                message: "No folder was selected",
+                color: "yellow",
+            });
+        }
+    };
+
+    const startDownloadNow = () => {
+        const combinedFilepath = joinPaths(filepathToDownloadTo, filename);
+        const effectiveSegments = metadata.segmented_possible ? numberOfSegments : 1;
+
+        addDownload.mutate({
+            url: metadata.url,
+            numberOfSegments: effectiveSegments,
+            filepath: combinedFilepath,
+        },
+            {
+                onSuccess: onSuccess,
+                onError: (err) => {
+                    console.error(err)
+                    notifications.show({
+                        title: "Failed to add download",
+                        message: err.message
+                    })
+                }
+            }
+        );
+
+    };
+
+    return (
+        <Box pos="relative">
+            <LoadingOverlay
+                visible={openFileMutation.isPending || addDownload.isPending}
+                zIndex={1000}
+                overlayProps={{ radius: "sm", blur: 2 }}
+            />
+
+            <form onSubmit={(e) => {
+                e.preventDefault();
+                startDownloadNow();
+            }}>
+                <Flex direction="column" gap="md">
+                    {/* 1. Filename Input with Label */}
+                    <TextInput
+                        label="File Name"
+                        value={filename}
+                        placeholder="e.g. linux-mint.iso"
+                        onChange={(event) => setFilename(event.target.value)}
+                        required
+                    />
+
+                    {/* 2. Filepath Input with EMBEDDED Folder Action Icon */}
+                    <TextInput
+                        label="Save Directory"
+                        value={filepathToDownloadTo}
+                        onChange={(event) => setFilepathToDownloadTo(event.target.value)}
+                        placeholder="Select destination folder..."
+                        required
+                        rightSection={
+                            <ActionIcon
+                                variant="subtle"
+                                color="gray"
+                                onClick={chooseFolderByPrompt}
+                                title="Browse folder"
+                            >
+                                <Folder size={18} />
+                            </ActionIcon>
+                        }
+                    />
+
+                    {/* 3. Segmented Threads Configuration */}
+                    {metadata.segmented_possible && (
+                        <NumberInput
+                            label="Download Connections (Segments)"
+                            description="Higher values can increase download speed on fast connections"
+                            min={1}
+                            max={32}
+                            value={numberOfSegments}
+                            onChange={(val) => setNumberOfSegments(typeof val === "number" ? val : 1)}
+                        />
+                    )}
+
+                    {/* 4. Collapsible Info Card */}
+                    <MoreInfo
+                        url={metadata.url}
+                        filename={metadata.filename}
+                        filesize={metadata.filesize ? `${(metadata.filesize / 1024 / 1024).toFixed(1)} MiB` : "Unknown"}
+                        segmentedPossible={metadata.segmented_possible}
+                    />
+
+                    {/* 5. Primary Action Button at the BOTTOM */}
+                    <Button type="submit" fullWidth mt="xs">
+                        Start Download
+                    </Button>
                 </Flex>
             </form>
-        </Modal >
+        </Box>
     );
 }

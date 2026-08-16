@@ -74,13 +74,12 @@ impl InPlaceSegment {
         given_data: InPlaceSegmentData,
         polling_rate: u64,
         command_reciever: watch::Receiver<SegmentCommand>,
+        prev_state: DownloadState,
     ) -> Result<(InPlaceSegment, watch::Receiver<DownloadStatus>), SegmentVerificationError> {
         let (sender, reciever) = watch::channel(DownloadStatus {
             total: InPlaceSegment::get_total_size(client.clone(), &given_data).await,
             downloaded: given_data.last_downloaded,
-            status: DownloadState::Running {
-                download_speed: 0.0,
-            },
+            state: prev_state,
         });
         let required_segment = InPlaceSegment {
             data: given_data,
@@ -115,13 +114,17 @@ impl InPlaceSegment {
             let _ = self.sender.send(DownloadStatus {
                 total: self.sender.borrow().total,
                 downloaded: self.sender.borrow().downloaded,
-                status: DownloadState::Failed(err.clone()),
+                state: DownloadState::Failed(err.clone()),
             });
         }
 
         res
     }
     async fn start_internal(&self) -> Result<(), DownloadRunError> {
+        let status = self.sender.borrow().clone().state;
+        if !matches!(status, DownloadState::Running { .. }) {
+            return Ok(());
+        }
         let total_size = if let Some(info) = &self.data.info {
             Some(info.size())
         } else {
@@ -133,14 +136,14 @@ impl InPlaceSegment {
             let _ = self.sender.send(DownloadStatus {
                 total: total_size,
                 downloaded: self.data.last_downloaded,
-                status: DownloadState::Completed { size },
+                state: DownloadState::Completed { size },
             });
             return Ok(());
         }
         let _ = self.sender.send(DownloadStatus {
             total: total_size,
             downloaded: self.data.last_downloaded,
-            status: DownloadState::Running {
+            state: DownloadState::Running {
                 download_speed: 0.0,
             },
         });
@@ -182,7 +185,7 @@ impl InPlaceSegment {
                     let _ = self.sender.send(DownloadStatus {
                         total: total_size,
                         downloaded,
-                        status: DownloadState::Stopped,
+                        state: DownloadState::Stopped,
                     });
                     return Ok(());
                 }
@@ -190,7 +193,7 @@ impl InPlaceSegment {
                     let _ = self.sender.send(DownloadStatus {
                         total: total_size,
                         downloaded,
-                        status: DownloadState::Paused,
+                        state: DownloadState::Paused,
                     });
 
                     file.flush().await?;
@@ -212,7 +215,7 @@ impl InPlaceSegment {
                     let _ = self.sender.send(DownloadStatus {
                         total: total_size,
                         downloaded,
-                        status,
+                        state: status,
                     });
                     file.flush().await?;
                     return Ok(());
@@ -234,7 +237,7 @@ impl InPlaceSegment {
                     let _ = self.sender.send(DownloadStatus {
                         downloaded,
                         total: total_size,
-                        status: DownloadState::Running { download_speed },
+                        state: DownloadState::Running { download_speed },
                     });
                     last_update = Instant::now();
                     last_downloaded = downloaded;
@@ -247,7 +250,7 @@ impl InPlaceSegment {
         let _ = self.sender.send(DownloadStatus {
             downloaded,
             total: Some(downloaded),
-            status: DownloadState::Completed { size: downloaded },
+            state: DownloadState::Completed { size: downloaded },
         });
         Ok(())
     }

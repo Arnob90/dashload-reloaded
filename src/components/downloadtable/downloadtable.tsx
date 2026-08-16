@@ -1,162 +1,303 @@
-import { useMemo, useState } from "react"
-import { GetStatusFullResult } from "../../code/typesOfBackend.ts"
-import { List } from "immutable"
-import { ActionIcon, Table, Text } from "@mantine/core"
-import { bytesToMIB } from "../../code/utils.ts"
-import { createColumnHelper, getCoreRowModel, useReactTable, flexRender } from "@tanstack/react-table"
-import style from "./downloadtable.module.css"
-import { SelectableItemsTable } from "../selectabletable/selectableItemsTable.tsx"
-import { pause, resume } from "../../code/download.ts"
-import { notifications } from "@mantine/notifications"
-import { ChevronRight, Pause, PauseIcon } from "lucide-react"
-export type StatusFullResultValue = GetStatusFullResult[keyof GetStatusFullResult]
-export type StatusViewWithoutId = {
-    filename: string,
-    status: string,
-    downloaded: number | null,
-    total: number | null,
-    downloadSpeed: number | null,
-    downloaded_portion: number | null,
-    eta_secs: number | null
-}
-export type StatusView = StatusViewWithoutId & {
-    id: string
-}
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActionIcon, Table, Text, Menu } from "@mantine/core";
+import { bytesToMIB } from "../../code/utils.ts";
+import {
+    createColumnHelper,
+    useTable,
+    createSortedRowModel,
+    rowSortingFeature,
+    flexRender,
+    SortingState,
+    tableFeatures
+} from "@tanstack/react-table";
+import style from "./downloadtable.module.css";
+import { SelectableItemsTable } from "../selectabletable/selectableItemsTable.tsx";
+import {
+    useDownloadData,
+    useDownloadStatus,
+    usePauseDownload,
+    useResumeDownload,
+} from "../../code/useDownloads.ts";
+import { notifications } from "@mantine/notifications";
+import { ChevronRight, FolderOpen, Pause, Trash } from "lucide-react";
+import { revealItemInDir } from "@tauri-apps/plugin-opener"
+import type { DownloadState } from "../../code/typesOfBackend.ts";
 
 function formatTime(seconds: number): string {
+    if (seconds <= 0 || !isFinite(seconds)) return "-";
+
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
 
-    // Pad with leading zeros if needed
-    const paddedHrs = String(hrs).padStart(2, '0');
-    const paddedMins = String(mins).padStart(2, '0');
-    const paddedSecs = String(secs).padStart(2, '0');
+    const paddedHrs = String(hrs).padStart(2, "0");
+    const paddedMins = String(mins).padStart(2, "0");
+    const paddedSecs = String(secs).padStart(2, "0");
 
     return `${paddedHrs}:${paddedMins}:${paddedSecs}`;
 }
-function convertStatusToView(givenStatus: StatusFullResultValue): StatusViewWithoutId {
-    const filename = givenStatus.filename;
-    const status = givenStatus.status.kind;
-    if (status === "Running") {
-        return {
-            filename,
-            status,
-            downloadSpeed: givenStatus.status.payload.download_speed,
-            downloaded: givenStatus.status.payload.downloaded,
-            total: givenStatus.status.payload.total,
-            downloaded_portion: givenStatus.status.payload.downloaded_portion,
-            eta_secs: givenStatus.status.payload.eta_secs
-        }
-    }
-    return {
-        filename,
-        status,
-        downloadSpeed: null,
-        downloaded: null,
-        total: null,
-        downloaded_portion: null,
-        eta_secs: null
-    }
+
+export interface TableEntry {
+    id: string;
+    filename: string;
+    downloaded: number;
+    total: number | null;
+    speed: number | null;
+    eta: number | null;
+    status: DownloadState;
+    downloadedPortion: number | null;
+    filepath: string
 }
-function convertStatusDictToView(givenStatus: GetStatusFullResult): List<StatusView> {
-    let requiredArr = List<StatusView>([])
-    for (const id in givenStatus) {
-        const result = givenStatus[id]
-        const view = convertStatusToView(result)
-        requiredArr = requiredArr.push({ ...view, id: id })
-    }
-    return requiredArr
+
+export function getFilenameFromPath(filepath: string): string {
+    return filepath.trim().replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "_";
 }
-export interface DownloadTableProps {
-    toRender: GetStatusFullResult
-}
-export function DownloadTable({ toRender }: DownloadTableProps) {
-    const requiredArr = useMemo(() => convertStatusDictToView(toRender).toArray(), [toRender])
-    const [selectedId, setSelectedId] = useState<string | null>("")
-    const columnHelper = createColumnHelper<StatusView>()
-    const handlePause = async (id: string) => {
-        const err_maybe = await pause(id)
-        if (err_maybe === undefined) {
-            return
-        }
-        notifications.show({
-            title: "Failed to Pause",
-            message: err_maybe.payload
-        })
+
+export function calculateEta(
+    total: number | null,
+    downloaded: number,
+    speed: number | null
+): number | null {
+    if (total === null || speed === null || speed <= 0) {
+        return null;
     }
-    const handleResume = async (id: string) => {
-        const err_maybe = await resume(id)
-        if (err_maybe === undefined) {
-            return
-        }
-        const err_thing = err_maybe.payload;
-        if (typeof err_thing === "string") {
+    const remaining = Math.max(0, total - downloaded);
+    return remaining / speed;
+}
+
+export function useTableEntries(): TableEntry[] | null {
+    const {
+        data: statusDatas,
+        isPending: isPendingStatus,
+        error: statusGettingError,
+    } = useDownloadStatus();
+
+    const {
+        data: downloadDatas,
+        isPending: isPendingDownload,
+        error: downloadDataGettingError,
+    } = useDownloadData();
+
+    useEffect(() => {
+        if (statusGettingError != null) {
             notifications.show({
-                title: "Failed to Pause",
-                message: err_thing
-            })
+                title: "Failed to get status",
+                message: statusGettingError.message,
+                color: "red",
+            });
+            console.log(statusGettingError)
         }
-        else {
-            const message = err_thing.payload;
+        if (downloadDataGettingError != null) {
             notifications.show({
-                title: "Failed to Resume",
-                message
-            })
+                title: "Failed to fetch download data",
+                message: downloadDataGettingError.message,
+                color: "red",
+            });
         }
+    }, [statusGettingError, downloadDataGettingError]);
+    const entries = useMemo(() => {
+        if (!statusDatas || !downloadDatas) return null;
+
+        const res: TableEntry[] = [];
+
+        for (const id of Object.keys(statusDatas)) {
+            const data = downloadDatas[id];
+            const status = statusDatas[id];
+
+            if (!data || !status) continue;
+
+            const calculatedSpeed =
+                status.state.kind === "Running"
+                    ? status.state.payload.download_speed
+                    : null;
+
+            const portion =
+                status.total && status.total > 0
+                    ? status.downloaded / status.total
+                    : null;
+
+            res.push({
+                id,
+                filename: getFilenameFromPath(data.filepath),
+                downloaded: status.downloaded,
+                total: status.total,
+                speed: calculatedSpeed,
+                eta: calculateEta(status.total, status.downloaded, calculatedSpeed),
+                status: status.state,
+                downloadedPortion: portion,
+                filepath: data.filepath
+            });
+        }
+        res.sort((a, b) => a.id.localeCompare(b.id));
+        return res;
+    }, [statusDatas, downloadDatas]);
+
+    if (
+        isPendingDownload ||
+        isPendingStatus ||
+        statusGettingError != null ||
+        downloadDataGettingError != null
+    ) {
+        return null;
     }
-    const columns = [
-        columnHelper.display({
-            id: "actions",
-            header: "",
-            cell: (info) => {
-                const status = info.row.original.status;
-                if (status === "Paused") {
-                    return <ActionIcon variant="subtle" onClick={() => handleResume(info.row.original.id)}>
-                        <ChevronRight></ChevronRight>
-                    </ActionIcon>
-                }
-                return (
-                    <ActionIcon variant="subtle" onClick={() => handlePause(info.row.original.id)}>
-                        <Pause></Pause>
-                    </ActionIcon>
-                )
-            }
-        }),
-        columnHelper.accessor("filename", {
-            header: "Filename",
-            cell: (info) => info.getValue(),
-        }),
-        columnHelper.accessor("status", {
-            header: "Status",
-            cell: (info) => info.getValue(),
-        }),
-        columnHelper.accessor("downloaded", {
-            header: "Downloaded",
-            cell: (info) => <Text>{info.getValue() != null ? `${bytesToMIB(info.getValue()!)} MIB` : "-"}</Text>,
-        }),
-        columnHelper.accessor("total", {
-            header: "Total",
-            cell: (info) => <Text>{info.getValue() != null ? `${bytesToMIB(info.getValue()!)} MIB` : "-"}</Text>,
-        }),
-        columnHelper.accessor("downloadSpeed", {
-            header: "Download",
-            cell: (info) => <Text>{info.getValue() != null ? `${info.getValue()?.toFixed(2)} MBPS` : "-"}</Text>,
-        }),
-        columnHelper.accessor("downloaded_portion", {
-            header: "Downloaded Portion",
-            cell: (info) => <Text>{info.getValue() != null ? `${(info.getValue()! * 100).toFixed(2)}%` : "-"}</Text>,
-        }),
-        columnHelper.accessor("eta_secs", {
-            header: "ETA",
-            cell: (info) => <Text>{info.getValue() != null ? `${formatTime(info.getValue()!)}` : "-"}</Text>,
-        })
-    ]
-    const tableModel = useReactTable({
-        data: requiredArr,
-        columns: columns,
-        getCoreRowModel: getCoreRowModel()
-    })
+
+    return entries;
+}
+// ✅ Move OUTSIDE DownloadTable (at the top of the file)
+const features = tableFeatures({
+    rowSortingFeature,
+    sortedRowModel: createSortedRowModel(),
+});
+
+const columnHelper = createColumnHelper<typeof features, TableEntry>();
+
+export function DownloadTable() {
+    const entries = useTableEntries();
+    const tableData = useMemo(() => entries ?? [], [entries]);
+    const [selectedId, setSelectedId] = useState<string | null>(null);
+    const pauseMutation = usePauseDownload();
+    const resumeMutation = useResumeDownload();
+    const [sorting, setSorting] = useState<SortingState>([])
+    const handleOpenInFileManager = (path: string) => {
+        revealItemInDir(path)
+    }
+    const handlePause = useCallback((id: string) => {
+        pauseMutation.mutate(id, {
+            onError: (err) => {
+                notifications.show({
+                    title: "Failed to Pause",
+                    message: err.message,
+                    color: "red",
+                });
+            },
+        });
+    }, [pauseMutation]);
+
+    const handleResume = useCallback((id: string) => {
+        resumeMutation.mutate(id, {
+            onError: (err) => {
+                notifications.show({
+                    title: "Failed to Resume",
+                    message: err.message,
+                    color: "red",
+                });
+            },
+        });
+    }, [resumeMutation]);
+    const columns = useMemo(
+        () => columnHelper.columns([
+            columnHelper.display({
+                id: "actions",
+                header: "",
+                cell: (info) => {
+                    const stateKind = info.row.original.status.kind;
+
+                    if (stateKind === "Paused") {
+                        return (
+                            <ActionIcon
+                                variant="subtle"
+                                onClick={(e) => {
+                                    e.stopPropagation(); // Prevents row selection toggle on button click
+                                    handleResume(info.row.original.id);
+                                }}
+                            >
+                                <ChevronRight size={18} />
+                            </ActionIcon>
+                        );
+                    }
+
+                    if (stateKind === "Running") {
+                        return (
+                            <ActionIcon
+                                variant="subtle"
+                                onClick={(e) => {
+                                    e.stopPropagation(); // Prevents row selection toggle on button click
+                                    handlePause(info.row.original.id);
+                                }}
+                            >
+                                <Pause size={18} />
+                            </ActionIcon>
+                        );
+                    }
+
+                    return null;
+                },
+            }),
+            columnHelper.accessor("filename", {
+                header: "Filename",
+                cell: (info) => info.getValue(),
+            }),
+            columnHelper.accessor("status", {
+                header: "Status",
+                cell: (info) => info.getValue().kind,
+            }),
+            columnHelper.accessor("downloaded", {
+                header: "Downloaded",
+                cell: (info) => (
+                    <Text>
+                        {info.getValue() != null
+                            ? `${bytesToMIB(info.getValue()).toFixed(1)} MiB`
+                            : "-"}
+                    </Text>
+                ),
+            }),
+            columnHelper.accessor("total", {
+                header: "Total",
+                cell: (info) => (
+                    <Text>
+                        {info.getValue() != null
+                            ? `${bytesToMIB(info.getValue()!).toFixed(1)} MiB`
+                            : "-"}
+                    </Text>
+                ),
+            }),
+            columnHelper.accessor("speed", {
+                header: "Speed",
+                cell: (info) => (
+                    <Text>
+                        {info.getValue() != null
+                            ? `${bytesToMIB(info.getValue()!).toFixed(2)} MiB/s`
+                            : "-"}
+                    </Text>
+                ),
+            }),
+            columnHelper.accessor("downloadedPortion", {
+                header: "Progress",
+                cell: (info) => (
+                    <Text>
+                        {info.getValue() != null
+                            ? `${(info.getValue()! * 100).toFixed(1)}%`
+                            : "-"}
+                    </Text>
+                ),
+            }),
+            columnHelper.accessor("eta", {
+                header: "ETA",
+                cell: (info) => (
+                    <Text>
+                        {info.getValue() != null ? formatTime(info.getValue()!) : "-"}
+                    </Text>
+                ),
+            }),
+        ]),
+        [handlePause, handleResume]
+    );
+
+    const tableModel = useTable({
+        features,
+        data: tableData,
+        columns,
+        getRowId: (row) => row.id,
+        onSortingChange: setSorting,
+        state: {
+            sorting
+        }
+    });
+
+    if (entries === null) {
+        return <Text p="md">Loading downloads...</Text>;
+    }
+
     return (
         <SelectableItemsTable setSelectedId={setSelectedId}>
             <Table.Thead>
@@ -177,21 +318,44 @@ export function DownloadTable({ toRender }: DownloadTableProps) {
             </Table.Thead>
             <Table.Tbody>
                 {tableModel.getRowModel().rows.map((row) => (
-                    <Table.Tr key={row.id} tabIndex={0} onClick={() => {
-                        if (selectedId === row.original.id) {
-                            setSelectedId(null)
-                            return
-                        }
-                        setSelectedId(row.original.id)
-                    }} className={row.original.id === selectedId ? `${style.selected_row}` : `${style.table_row}`}>
-                        {row.getVisibleCells().map((cell) => (
-                            <Table.Td key={cell.id}>
-                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            </Table.Td>
-                        ))}
-                    </Table.Tr>
+                    <Menu key={row.id} shadow="md" width={200} withinPortal>
+                        <Menu.ContextMenu>
+                            <Table.Tr
+                                key={row.id}
+                                tabIndex={0}
+                                onClick={() => {
+                                    if (selectedId === row.original.id) {
+                                        setSelectedId(null);
+                                        return;
+                                    }
+                                    setSelectedId(row.original.id);
+                                }}
+                                className={
+                                    row.original.id === selectedId
+                                        ? `${style.selected_row}`
+                                        : `${style.table_row}`
+                                }
+                            >
+                                {row.getAllCells().map((cell) => (
+                                    <Table.Td key={cell.id}>
+                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                    </Table.Td>
+                                ))}
+                            </Table.Tr>
+                        </Menu.ContextMenu>
+                        <Menu.Dropdown>
+                            <Menu.Item leftSection={<FolderOpen size={16} />}
+                                onClick={() => handleOpenInFileManager(row.original.filepath)}
+                            >
+                                Open in File Manager
+                            </Menu.Item>
+                            <Menu.Item leftSection={<Trash size={16} />} className={style.delete_menu_item}>
+                                Delete
+                            </Menu.Item>
+                        </Menu.Dropdown>
+                    </Menu>
                 ))}
             </Table.Tbody>
         </SelectableItemsTable>
-    )
+    );
 }

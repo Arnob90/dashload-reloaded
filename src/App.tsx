@@ -1,33 +1,35 @@
-import { useState } from "react";
 import "./App.css";
 import "@mantine/core/styles.css"
-import { MantineProvider, createTheme, ColorSchemeScript, Flex } from "@mantine/core"
+import { MantineProvider, Flex, createTheme } from "@mantine/core"
 import { DownloadHeader } from "./components/header/downloaditemheader"
 import "@mantine/notifications/styles.css"
-import { useDownloadStatuses } from "./code/getStatus";
-import { DownloadTable } from "./components/downloadtable/downloadtable";
 import { Notifications } from "@mantine/notifications"
 import { AddDownload } from "./components/adddownload/addDownloadMain";
+import { useDisclosure } from "@mantine/hooks";
+import { DownloadTable } from "./components/downloadtable/downloadtable";
+import { ErrorBoundary, getErrorMessage } from "react-error-boundary"
 const theme = createTheme({
 })
 
 function App() {
-    const [downloadDialogOpen, setOpen] = useState(false)
-    const { data } = useDownloadStatuses()
+    const [addDownloadDialogOpened, { open: openAddDownloadDialog, close: closeAddDownloadDiagog }] = useDisclosure(false)
     return (
-        <>
-            <ColorSchemeScript forceColorScheme="dark" />
+        <ErrorBoundary fallbackRender={({ error, resetErrorBoundary }) => (
+            <div role="alert">
+                <p>Something went wrong:</p>
+                <pre>{getErrorMessage(error)}</pre>
+                <button onClick={resetErrorBoundary}>Try again</button>
+            </div>
+        )}>
             <MantineProvider theme={theme} forceColorScheme="dark">
-                <Notifications />
-                <DownloadHeader onClickAddDownload={() => { setOpen(true); console.log(downloadDialogOpen) }} />
-                <AddDownload open={downloadDialogOpen} onOpenStateChangeRequested={(toSet) => {
-                    setOpen(toSet)
-                }} />
-                <Flex h="100vh">
-                    {data === undefined ? undefined : <DownloadTable toRender={data}></DownloadTable>}
+                <Flex direction="column" h="100vh" w="100vw">
+                    <Notifications />
+                    <DownloadHeader onClickAddDownload={openAddDownloadDialog} />
+                    <AddDownload opened={addDownloadDialogOpened} onClose={closeAddDownloadDiagog} />
+                    <DownloadTable />
                 </Flex>
             </MantineProvider>
-        </>
+        </ErrorBoundary>
     )
 }
 

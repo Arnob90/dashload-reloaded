@@ -21,7 +21,7 @@ impl From<reqwest::Error> for FilepathGettingError {
     }
 }
 
-pub async fn get_filename(
+pub async fn get_filename_from_url(
     client: reqwest::Client,
     url: &str,
 ) -> Result<String, FilepathGettingError> {

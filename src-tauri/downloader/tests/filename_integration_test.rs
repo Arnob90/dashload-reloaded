@@ -2,7 +2,7 @@
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 // Import the function you want to test from your library crate
-use downloader::info_getters::get_filename;
+use downloader::info_getters::get_filename_from_url;
 use log::info;
 
 #[tokio::test]
@@ -30,7 +30,7 @@ async fn test_filename_from_content_disposition_head() {
     // Call our function, pointing it at the mock server's URI.
     let client = reqwest::Client::new();
     let url_to_test = format!("{}/download.zip", mock_server.uri());
-    let result = get_filename(client, &url_to_test).await;
+    let result = get_filename_from_url(client, &url_to_test).await;
 
     // --- 3. Assert ---
     // Check that the result is what we expect.
@@ -52,7 +52,7 @@ async fn test_filename_from_url_fallback() {
     // --- 2. Act ---
     let client = reqwest::Client::new();
     let url_to_test = format!("{}/files/another-file.txt", mock_server.uri());
-    let result = get_filename(client, &url_to_test).await;
+    let result = get_filename_from_url(client, &url_to_test).await;
     info!("Logging from url fallback");
     info!("result: {:#?}", result);
 
@@ -87,7 +87,7 @@ async fn test_fallback_to_get_if_head_fails() {
     // --- 2. Act ---
     let client = reqwest::Client::new();
     let url_to_test = format!("{}/download.zip", mock_server.uri());
-    let result = get_filename(client, &url_to_test).await;
+    let result = get_filename_from_url(client, &url_to_test).await;
 
     // --- 3. Assert ---
     assert!(result.is_ok());
@@ -107,7 +107,7 @@ async fn test_error_when_no_filename_can_be_found() {
     // --- 2. Act ---
     let client = reqwest::Client::new();
     let url_to_test = format!("{}/a/directory/", mock_server.uri());
-    let result = get_filename(client, &url_to_test).await;
+    let result = get_filename_from_url(client, &url_to_test).await;
 
     // --- 3. Assert ---
     assert!(result.is_err());

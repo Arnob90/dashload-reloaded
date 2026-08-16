@@ -27,4 +27,4 @@ tokio = { version = "1.47.1", features = ["full"] }
 async-trait = "0.1.89"
 dirs-next = "2.0.0"
 tauri-plugin-dialog = "2"
-reqwest = "0.12.24"
+reqwest = "0.13"
