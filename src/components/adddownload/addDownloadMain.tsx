@@ -11,7 +11,6 @@ interface AddDownloadProps {
 
 export function AddDownload({ opened, onClose }: AddDownloadProps) {
     const [currentMetadata, setMetadata] = useState<DownloadInfo | undefined>()
-    console.log("I am rerendering")
     return (
         <Modal
             opened={opened}

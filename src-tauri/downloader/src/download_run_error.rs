@@ -24,6 +24,8 @@ pub enum DownloadRunError {
     /// Action: Internal state error
     #[error("Download is already running")]
     AlreadyRunning,
+    #[error("Failed to verify completed download")]
+    VerifyError,
 }
 
 // Automatic conversion for all std::io::Error (open, seek, write, flush, remove)

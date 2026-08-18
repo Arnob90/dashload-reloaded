@@ -2,7 +2,8 @@ use crate::download_data::DownloadData;
 use crate::download_run_error::DownloadRunError;
 use crate::download_status::{DownloadState, DownloadStatus};
 use crate::in_place_segment::{InPlaceSegment, SegmentCommand};
-use futures::future::join_all;
+use crate::verifier::Verifier;
+use futures::future::try_join_all;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
@@ -19,6 +20,7 @@ pub struct DownloadItem {
     pub url: String,
     pub polling_rate_ms: u64,
     pub segment_command_sender: watch::Sender<SegmentCommand>,
+    pub verifier: Arc<dyn Verifier>,
 }
 
 impl DownloadItem {
@@ -26,6 +28,7 @@ impl DownloadItem {
         client: reqwest::Client,
         mut download_data: DownloadData,
         polling_rate_ms: u64,
+        verifier: Arc<dyn Verifier>,
     ) -> Result<Arc<Self>, Box<dyn std::error::Error>> {
         // 1. Pre-allocate target file on disk if filesize is known
         let file_exists = tokio::fs::metadata(&download_data.filepath).await.is_ok();
@@ -75,6 +78,7 @@ impl DownloadItem {
             url: download_data.url,
             polling_rate_ms,
             segment_command_sender: segment_commander,
+            verifier,
         });
         Ok(item)
     }
@@ -85,16 +89,23 @@ impl DownloadItem {
         }
 
         // Run all segment workers concurrently
-        let results = join_all(futures).await;
+        let results = try_join_all(futures).await;
         // Delete the file for a stop command
         if *self.segment_command_sender.borrow() == SegmentCommand::Stop {
             //TODO: Warn user if file deletion fails
             let _ = tokio::fs::remove_file(&self.filepath).await;
         }
-
-        // Propagate the first error encountered, if any
-        for result in results {
-            result?;
+        results?;
+        let verify_clone = self.verifier.clone();
+        let filepath_clone = self.filepath.clone();
+        let verified = tokio::task::spawn_blocking(move || verify_clone.verify(&filepath_clone))
+            .await
+            .map_err(|e| DownloadRunError::DiskError(format!("Verification task panicked {}", e)))?
+            .map_err(|e| {
+                DownloadRunError::DiskError(format!("IO error during validation {}", e))
+            })?;
+        if !verified {
+            return Err(DownloadRunError::VerifyError);
         }
 
         Ok(())

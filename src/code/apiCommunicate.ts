@@ -25,11 +25,10 @@ export async function openFile(): Promise<string | null> {
 export async function getStatus(): Promise<DownloadStatusMap> {
     try {
         const statusMaybe = await invoke("get_status")
-        console.log(statusMaybe)
         return await DownloadStatusMapSchema.parseAsync(statusMaybe)
     }
     catch (err) {
-        console.log(err)
+        console.error(err)
         throw ManagerErrorSchema.parse(err)
     }
 }
@@ -43,7 +42,7 @@ export async function getDownloadMetadata(url: string): Promise<DownloadInfo> {
         return info
     }
     catch (err) {
-        console.log(err)
+        console.error(err)
         throw DownloadInfoGetErrorSchema.parse(err)
     }
 }

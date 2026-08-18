@@ -18,3 +18,35 @@ export function joinPaths(dir: string, filename: string): string {
 
     return `${cleanDir}${separator}${cleanFile}`;
 }
+export function formatTime(seconds: number): string {
+    if (seconds <= 0 || !isFinite(seconds)) return "-";
+
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    const paddedHrs = String(hrs).padStart(2, "0");
+    const paddedMins = String(mins).padStart(2, "0");
+    const paddedSecs = String(secs).padStart(2, "0");
+
+    return `${paddedHrs}:${paddedMins}:${paddedSecs}`;
+}
+
+
+
+export function calculateEta(
+    total: number | null,
+    downloaded: number,
+    speed: number | null
+): number | null {
+    if (total === null || speed === null || speed <= 0) {
+        return null;
+    }
+    const remaining = Math.max(0, total - downloaded);
+    return remaining / speed;
+}
+
+
+export function getFilenameFromPath(filepath: string): string {
+    return filepath.trim().replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "_";
+}
