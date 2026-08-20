@@ -5,6 +5,7 @@ use crate::download_status::DownloadState;
 use crate::download_status::DownloadStatus;
 use crate::info_getters;
 use crate::serialization_error::DataSerializationError;
+use crate::verifier::VerifierMaybe;
 use dashmap::DashMap;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -61,33 +62,24 @@ impl DownloadManager {
         Ok(manager)
     }
 
-    pub async fn add_normal_download(
-        &self,
-        url: String,
-        filepath: PathBuf,
-    ) -> Result<String, ManagerError> {
-        let data = DownloadDataFactory::new_normal(url, filepath);
-        let item = DownloadItem::create_from_data(self.client.clone(), data, self.poll_every_ms)
-            .await
-            .map_err(|e| ManagerError::DownloadCreationError(e.to_string()))?;
-        let id = Uuid::new_v4().as_simple().to_string();
-        self.download_items.insert(id.clone(), item);
-        Ok(id)
-    }
-
     /// Adds a new download (handles both 1 segment and multi-segment)
     pub async fn add_download(
         &self,
         url: String,
         filepath: PathBuf,
         number_of_segments: u64,
+        verifier: VerifierMaybe,
     ) -> Result<String, ManagerError> {
         // 1. Fetch filesize. Fallback to `new_normal` (N=1) if unknown!
         let data = match info_getters::get_filesize(self.client.clone(), &url).await {
-            Some(filesize) => {
-                DownloadDataFactory::new_segmented(url, filepath, filesize, number_of_segments)
-            }
-            None => DownloadDataFactory::new_normal(url, filepath),
+            Some(filesize) => DownloadDataFactory::new_segmented(
+                url,
+                filepath,
+                filesize,
+                number_of_segments,
+                verifier,
+            ),
+            None => DownloadDataFactory::new_normal(url, filepath, verifier),
         };
 
         // 2. Construct the DownloadItem

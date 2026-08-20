@@ -1,5 +1,6 @@
 use downloader::download_manager::DownloadManager;
 use downloader::download_status::DownloadState;
+use downloader::verifier::VerifierMaybe;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -19,8 +20,9 @@ async fn test_segmented_download_progress() {
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_segmented");
 
+    // Pass VerifierMaybe::none() (or VerifierMaybe { verifier: None })
     let id = manager
-        .add_download(TEST_URL.to_string(), path.clone(), 4)
+        .add_download(TEST_URL.to_string(), path.clone(), 4, VerifierMaybe::none())
         .await
         .unwrap();
 
@@ -52,9 +54,9 @@ async fn test_pause_and_resume_lifecycle() {
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_resume");
 
-    // 1. Start download
+    // 1. Start download with VerifierMaybe::none()
     let id = manager
-        .add_download(TEST_URL.to_string(), path.clone(), 4)
+        .add_download(TEST_URL.to_string(), path.clone(), 4, VerifierMaybe::none())
         .await
         .unwrap();
 
@@ -92,14 +94,16 @@ async fn test_pause_and_resume_lifecycle() {
     let _ = tokio::fs::remove_file(&path).await;
 }
 
+/// Test 3: Single Stream Fallback (N = 1)
 #[test_log::test(tokio::test)]
 async fn test_single_stream_download() {
     let client = reqwest::Client::new();
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_single");
 
+    // 1 segment (N = 1) with VerifierMaybe::none()
     let id = manager
-        .add_download(TEST_URL.to_string(), path.clone(), 1)
+        .add_download(TEST_URL.to_string(), path.clone(), 1, VerifierMaybe::none())
         .await
         .unwrap();
 

@@ -1,32 +1,37 @@
-use digest::Digest;
+use crate::serialize_io_error::serialize_io_error;
+use digest::DynDigest;
+use md5::{Digest, Md5};
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Read;
-use std::marker::PhantomData;
 use std::path::Path;
 use thiserror::Error;
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Serialize)]
 pub enum VerifyError {
+    #[serde(serialize_with = "serialize_io_error")]
     #[error("There has been error in IO")]
     IOError(#[from] std::io::Error),
 }
-pub trait Verifier: Send + Sync {
-    fn verify(&self, filepath: &Path) -> Result<bool, VerifyError>;
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum HashAlgo {
+    Sha256,
+    Sha512,
+    Md5,
 }
-pub struct DigestVerify<D>
-where
-    D: Digest,
-{
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Verifier {
     to_match_hash: String,
-    _marker: PhantomData<D>,
+    algo: HashAlgo,
 }
-impl<D> Verifier for DigestVerify<D>
-where
-    D: Digest + Send + Sync,
-{
-    fn verify(&self, filepath: &Path) -> Result<bool, VerifyError> {
-        let mut file = File::open(filepath)?;
-        let mut hasher = D::new();
+impl Verifier {
+    pub fn verify(&self, filepath: &Path) -> Result<bool, VerifyError> {
+        let mut hasher: Box<dyn DynDigest> = match self.algo {
+            HashAlgo::Sha256 => Box::new(sha2::Sha256::new()),
+            HashAlgo::Sha512 => Box::new(sha2::Sha512::new()),
+            HashAlgo::Md5 => Box::new(Md5::new()),
+        };
         let mut buffer = [0u8; 8192];
+        let mut file = File::open(filepath)?;
         loop {
             let bytes_read = file.read(&mut buffer)?;
             if bytes_read == 0 {
@@ -34,52 +39,32 @@ where
             }
             hasher.update(&buffer[..bytes_read]);
         }
-        let result_str = hex::encode(hasher.finalize());
-        Ok(result_str == self.to_match_hash)
+        let res = hasher.finalize_reset();
+        let computed_hex = hex::encode(res);
+        Ok(computed_hex == self.to_match_hash)
     }
 }
-impl<D> DigestVerify<D>
-where
-    D: Digest,
-{
-    pub fn new(to_match_hash: String) -> Self {
-        Self {
-            to_match_hash,
-            _marker: PhantomData,
+#[derive(Serialize, Deserialize, Clone)]
+pub struct VerifierMaybe {
+    verifier: Option<Verifier>,
+}
+impl VerifierMaybe {
+    pub fn new(algo: HashAlgo, to_match_hash: String) -> Self {
+        VerifierMaybe {
+            verifier: Some(Verifier {
+                algo,
+                to_match_hash,
+            }),
         }
     }
-}
-pub struct NoopVerify;
-impl Verifier for NoopVerify {
-    fn verify(&self, _filepath: &Path) -> Result<bool, VerifyError> {
-        Ok(true)
+    pub fn none() -> Self {
+        VerifierMaybe { verifier: None }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum HashAlgo {
-    Sha256,
-    Sha512,
-    Md5,
-}
-pub struct VerifierUserInput {
-    algo: HashAlgo,
-    hash: String,
-}
-pub fn create_verifier(checksum: Option<VerifierUserInput>) -> Box<dyn Verifier> {
-    match checksum {
-        Some(VerifierUserInput {
-            algo: HashAlgo::Sha256,
-            hash,
-        }) => Box::new(DigestVerify::<sha2::Sha256>::new(hash)),
-        Some(VerifierUserInput {
-            algo: HashAlgo::Sha512,
-            hash,
-        }) => Box::new(DigestVerify::<sha2::Sha512>::new(hash)),
-        Some(VerifierUserInput {
-            algo: HashAlgo::Md5,
-            hash,
-        }) => Box::new(DigestVerify::<md5::Md5>::new(hash)),
-        None => Box::new(NoopVerify {}),
+    pub fn verify(&self, filepath: &Path) -> Result<bool, VerifyError> {
+        if let Some(verifier) = &self.verifier {
+            verifier.verify(filepath)
+        } else {
+            Ok(true)
+        }
     }
 }

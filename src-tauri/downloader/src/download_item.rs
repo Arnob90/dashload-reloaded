@@ -2,7 +2,7 @@ use crate::download_data::DownloadData;
 use crate::download_run_error::DownloadRunError;
 use crate::download_status::{DownloadState, DownloadStatus};
 use crate::in_place_segment::{InPlaceSegment, SegmentCommand};
-use crate::verifier::Verifier;
+use crate::verifier::VerifierMaybe;
 use futures::future::try_join_all;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,6 +13,13 @@ pub enum CreateOpts {
     Segmented { num_segments: u64, filesize: u64 },
     Normal,
 }
+
+pub enum VerificationState {
+    Verifying,
+    Verified,
+    VerifyFailed,
+}
+
 pub struct DownloadItem {
     pub segments: Vec<InPlaceSegment>,
     pub status_receivers: Vec<tokio::sync::watch::Receiver<DownloadStatus>>,
@@ -20,7 +27,9 @@ pub struct DownloadItem {
     pub url: String,
     pub polling_rate_ms: u64,
     pub segment_command_sender: watch::Sender<SegmentCommand>,
-    pub verifier: Arc<dyn Verifier>,
+    pub verifier: VerifierMaybe,
+    pub verify_result_receiver: watch::Receiver<VerificationState>,
+    pub verify_result_sender: watch::Sender<VerificationState>,
 }
 
 impl DownloadItem {
@@ -28,7 +37,6 @@ impl DownloadItem {
         client: reqwest::Client,
         mut download_data: DownloadData,
         polling_rate_ms: u64,
-        verifier: Arc<dyn Verifier>,
     ) -> Result<Arc<Self>, Box<dyn std::error::Error>> {
         // 1. Pre-allocate target file on disk if filesize is known
         let file_exists = tokio::fs::metadata(&download_data.filepath).await.is_ok();
@@ -70,6 +78,7 @@ impl DownloadItem {
             segments.push(segment);
             status_receivers.push(rx);
         }
+        let (sender, receiver) = watch::channel(VerificationState::Verifying);
 
         let item = Arc::new(Self {
             segments,
@@ -78,7 +87,9 @@ impl DownloadItem {
             url: download_data.url,
             polling_rate_ms,
             segment_command_sender: segment_commander,
-            verifier,
+            verifier: download_data.verifier.clone(),
+            verify_result_receiver: receiver,
+            verify_result_sender: sender,
         });
         Ok(item)
     }
@@ -105,9 +116,12 @@ impl DownloadItem {
                 DownloadRunError::DiskError(format!("IO error during validation {}", e))
             })?;
         if !verified {
+            let _ = self
+                .verify_result_sender
+                .send(VerificationState::VerifyFailed);
             return Err(DownloadRunError::VerifyError);
         }
-
+        let _ = self.verify_result_sender.send(VerificationState::Verified);
         Ok(())
     }
 
@@ -149,10 +163,11 @@ impl DownloadItem {
                     all_completed = false;
                     any_stopped = true
                 }
+                DownloadState::Verifying => {}
             }
         }
 
-        let overall_state = if let Some(err) = any_failed {
+        let mut overall_state = if let Some(err) = any_failed {
             DownloadState::Failed(err)
         } else if all_completed {
             DownloadState::Completed {
@@ -167,6 +182,15 @@ impl DownloadItem {
                 download_speed: total_speed,
             }
         };
+        if let DownloadState::Completed { .. } = overall_state {
+            overall_state = match *self.verify_result_receiver.borrow() {
+                VerificationState::Verifying => DownloadState::Verifying,
+                VerificationState::VerifyFailed => {
+                    DownloadState::Failed(DownloadRunError::VerifyError)
+                }
+                VerificationState::Verified => overall_state,
+            }
+        }
 
         DownloadStatus {
             total: total_filesize,
@@ -187,6 +211,7 @@ impl DownloadItem {
                 .map(|segment| segment.snapshot())
                 .collect(),
             state: self.get_status().state,
+            verifier: self.verifier.clone(),
         }
     }
 

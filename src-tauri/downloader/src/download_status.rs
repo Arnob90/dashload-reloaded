@@ -9,6 +9,7 @@ pub enum DownloadState {
     Completed { size: u64 },
     Failed(DownloadRunError),
     Paused,
+    Verifying,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DownloadStatus {

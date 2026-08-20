@@ -24,6 +24,10 @@ export const DownloadRunErrorSchema = z.discriminatedUnion("kind", [
         kind: z.literal("AlreadyRunning"),
         message: z.string(),
     }),
+    z.object({
+        kind: z.literal("VerifyError"),
+        message: z.string(),
+    }),
 ]);
 
 export type DownloadRunError = z.infer<typeof DownloadRunErrorSchema>;
@@ -51,6 +55,7 @@ export const DownloadStateSchema = z.discriminatedUnion("kind", [
         payload: DownloadRunErrorSchema,
     }),
     z.object({ kind: z.literal("Paused") }),
+    z.object({ kind: z.literal("Verifying") }),
 ]);
 
 export type DownloadState = z.infer<typeof DownloadStateSchema>;
@@ -145,16 +150,31 @@ export const InPlaceSegmentDataSchema = z.object({
 
 export type InPlaceSegmentData = z.infer<typeof InPlaceSegmentDataSchema>
 
+export const HashAlgoSchema = z.enum(["Sha256", "Sha512", "Md5"]);
+export type HashAlgo = z.infer<typeof HashAlgoSchema>;
+
+export const VerifierSchema = z.object({
+    to_match_hash: z.string(),
+    algo: HashAlgoSchema,
+});
+export type Verifier = z.infer<typeof VerifierSchema>;
+
+export const VerifierMaybeSchema = z.object({
+    verifier: VerifierSchema.nullable(),
+});
+export type VerifierMaybe = z.infer<typeof VerifierMaybeSchema>;
 
 export const DownloadDataSchema = z.object({
     url: z.string(),
     filepath: z.string(),
     segments: z.array(InPlaceSegmentDataSchema),
     length: z.number().nullable(),
-    state: DownloadStateSchema
+    state: DownloadStateSchema,
+    verifier: VerifierMaybeSchema
 
 })
 export type DownloadData = z.infer<typeof DownloadDataSchema>
 
 export const DownloadDataMapSchema = z.record(z.string(), DownloadDataSchema)
 export type DownloadDataMap = z.infer<typeof DownloadDataMapSchema>
+

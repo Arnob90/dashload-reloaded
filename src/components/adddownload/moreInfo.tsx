@@ -1,6 +1,6 @@
 import { Collapse, Text, Flex, Paper, NavLink, Group, Divider } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { ChevronDown, ChevronRight, Info } from "lucide-react";
+import { Info } from "lucide-react";
 
 export interface MoreInfoProps {
     url: string;

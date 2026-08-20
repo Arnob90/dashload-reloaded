@@ -21,7 +21,10 @@ export function AddDownload({ opened, onClose }: AddDownloadProps) {
             {currentMetadata === undefined ? (
                 <AddDownloadUrl submitMetadata={setMetadata} />
             ) : (
-                <RunDownloadDialog metadata={currentMetadata} onSuccess={onClose} />
+                <RunDownloadDialog metadata={currentMetadata} onSuccess={() => {
+                    setMetadata(undefined)
+                    onClose()
+                }} />
             )}
         </Modal>
     )

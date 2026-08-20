@@ -5,6 +5,7 @@ use downloader::download_status::DownloadStatus;
 use downloader::get_download_info::{get_download_info, DownloadInfo};
 use downloader::get_error_message::get_error_message;
 use downloader::info_getters::get_filename_from_url;
+use downloader::verifier::VerifierMaybe;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -40,10 +41,16 @@ async fn add_download(
     url: &str,
     filepath: &str,
     number_of_segments: u64,
+    verifier: VerifierMaybe,
 ) -> Result<String, Value> {
     let manager = &state.download_manager;
     let id = manager
-        .add_download(url.to_string(), filepath.into(), number_of_segments)
+        .add_download(
+            url.to_string(),
+            filepath.into(),
+            number_of_segments,
+            verifier,
+        )
         .await
         .map_err(get_error_message_wrap)?;
     Ok(id)

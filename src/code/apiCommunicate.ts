@@ -1,12 +1,13 @@
 import { invoke } from "@tauri-apps/api/core"
 import z from "zod"
-import { DownloadDataMap, DownloadDataMapSchema, DownloadInfo, DownloadInfoSchema, DownloadStatusMapSchema, DownloadStatusMap, ManagerErrorSchema, DownloadInfoGetErrorSchema } from "./typesOfBackend"
-export async function addDownload(url: string, filepath: string, numberOfSegments: number): Promise<string> {
+import { DownloadDataMap, DownloadDataMapSchema, DownloadInfo, DownloadInfoSchema, DownloadStatusMapSchema, DownloadStatusMap, ManagerErrorSchema, DownloadInfoGetErrorSchema, VerifierMaybe } from "./typesOfBackend"
+export async function addDownload(url: string, filepath: string, numberOfSegments: number, verifier: VerifierMaybe): Promise<string> {
     try {
         const idMaybe = await invoke("add_download", {
             url: url,
             filepath: filepath,
-            numberOfSegments: numberOfSegments
+            numberOfSegments: numberOfSegments,
+            verifier: verifier
         })
         const id = await z.string().parseAsync(idMaybe)
         return id

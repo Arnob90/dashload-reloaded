@@ -1,11 +1,12 @@
 import { Box, TextInput, Flex, ActionIcon, Button, LoadingOverlay, NumberInput } from "@mantine/core";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
 import { MoreInfo } from "./moreInfo.tsx";
 import { useAddDownload, useOpenFile } from "../../code/useDownloads.ts";
-import { DownloadInfo } from "../../code/typesOfBackend.ts";
+import { DownloadInfo, VerifierMaybe, HashAlgo } from "../../code/typesOfBackend.ts";
 import { joinPaths } from "../../code/utils.ts";
 import { notifications } from "@mantine/notifications";
+import { VerifierOptions } from "./verifierOptions.tsx";
 
 export interface RunDownloadDialogProps {
     metadata: DownloadInfo;
@@ -16,7 +17,19 @@ export function RunDownloadDialog({ metadata, onSuccess }: RunDownloadDialogProp
     const [filepathToDownloadTo, setFilepathToDownloadTo] = useState("");
     const [filename, setFilename] = useState(metadata.filename ?? "");
     const [numberOfSegments, setNumberOfSegments] = useState(metadata.segmented_possible ? 4 : 1);
-
+    const [chosenAlgo, setChosenAlgo] = useState<HashAlgo | null>(null)
+    const [hash, setChosenHash] = useState<string>("")
+    const verifier: VerifierMaybe = useMemo(() => {
+        if (chosenAlgo === null) {
+            return { verifier: null } satisfies VerifierMaybe
+        }
+        return {
+            verifier: {
+                to_match_hash: hash,
+                algo: chosenAlgo
+            }
+        } satisfies VerifierMaybe
+    }, [chosenAlgo, hash])
     const openFileMutation = useOpenFile();
     const addDownload = useAddDownload();
 
@@ -35,7 +48,7 @@ export function RunDownloadDialog({ metadata, onSuccess }: RunDownloadDialogProp
         }
     };
 
-    const startDownloadNow = () => {
+    const startDownloadNow = useCallback(() => {
         const combinedFilepath = joinPaths(filepathToDownloadTo, filename);
         const effectiveSegments = metadata.segmented_possible ? numberOfSegments : 1;
 
@@ -43,6 +56,7 @@ export function RunDownloadDialog({ metadata, onSuccess }: RunDownloadDialogProp
             url: metadata.url,
             numberOfSegments: effectiveSegments,
             filepath: combinedFilepath,
+            verifier
         },
             {
                 onSuccess: onSuccess,
@@ -56,7 +70,7 @@ export function RunDownloadDialog({ metadata, onSuccess }: RunDownloadDialogProp
             }
         );
 
-    };
+    }, [metadata, verifier, filepathToDownloadTo, filename, numberOfSegments]);
 
     return (
         <Box pos="relative">
@@ -98,7 +112,6 @@ export function RunDownloadDialog({ metadata, onSuccess }: RunDownloadDialogProp
                             </ActionIcon>
                         }
                     />
-
                     {/* 3. Segmented Threads Configuration */}
                     {metadata.segmented_possible && (
                         <NumberInput
@@ -118,6 +131,7 @@ export function RunDownloadDialog({ metadata, onSuccess }: RunDownloadDialogProp
                         filesize={metadata.filesize ? `${(metadata.filesize / 1024 / 1024).toFixed(1)} MiB` : "Unknown"}
                         segmentedPossible={metadata.segmented_possible}
                     />
+                    <VerifierOptions chosenHash={hash} chosenAlgo={chosenAlgo} setChosenHash={setChosenHash} setChosenAlgo={setChosenAlgo} />
 
                     {/* 5. Primary Action Button at the BOTTOM */}
                     <Button type="submit" fullWidth mt="xs">

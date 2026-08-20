@@ -12,7 +12,7 @@ import {
     resume,
     getData,
 } from "./apiCommunicate.ts"; // Your invoke file
-import type { DownloadStatusMap, DownloadInfo, DownloadDataMap } from "./typesOfBackend";
+import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, VerifierMaybe } from "./typesOfBackend";
 
 // ============================================================================
 // 1. Centralized Query Keys
@@ -88,11 +88,13 @@ export function useAddDownload() {
             url,
             filepath,
             numberOfSegments,
+            verifier
         }: {
             url: string;
             filepath: string;
             numberOfSegments: number;
-        }) => addDownload(url, filepath, numberOfSegments),
+            verifier: VerifierMaybe
+        }) => addDownload(url, filepath, numberOfSegments, verifier),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: downloadKeys.all })
         },
