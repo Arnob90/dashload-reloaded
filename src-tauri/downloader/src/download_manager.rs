@@ -4,6 +4,7 @@ use crate::download_item::DownloadItem;
 use crate::download_status::DownloadState;
 use crate::download_status::DownloadStatus;
 use crate::info_getters;
+use crate::request_headers::RequestHeaders;
 use crate::serialization_error::DataSerializationError;
 use crate::verifier::VerifierMaybe;
 use dashmap::DashMap;
@@ -69,6 +70,7 @@ impl DownloadManager {
         filepath: PathBuf,
         number_of_segments: u64,
         verifier: VerifierMaybe,
+        request_headers: RequestHeaders,
     ) -> Result<String, ManagerError> {
         // 1. Fetch filesize. Fallback to `new_normal` (N=1) if unknown!
         let data = match info_getters::get_filesize(self.client.clone(), &url).await {
@@ -78,8 +80,9 @@ impl DownloadManager {
                 filesize,
                 number_of_segments,
                 verifier,
+                request_headers,
             ),
-            None => DownloadDataFactory::new_normal(url, filepath, verifier),
+            None => DownloadDataFactory::new_normal(url, filepath, verifier, request_headers),
         };
 
         // 2. Construct the DownloadItem

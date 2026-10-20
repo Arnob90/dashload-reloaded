@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 async-trait = "0.1.91"
+axum = "0.8.9"
 bytes = "1.12.1"
 content_disposition = "0.4.0"
 dashmap = "6.1.0"

@@ -1,10 +1,12 @@
 use downloader::download_manager::DownloadManager;
 use downloader::download_status::DownloadState;
+use downloader::request_headers::RequestHeaders;
 use downloader::verifier::{HashAlgo, VerifierMaybe};
 use std::path::PathBuf;
 use std::time::Duration;
 
 #[test_log::test(tokio::test)]
+#[ignore = "Heavy 3GB download, run locally with --ignored"]
 async fn test_download() {
     let update_rate_ms: u64 = 400;
     let client = reqwest::Client::new();
@@ -38,13 +40,28 @@ async fn test_download() {
     // 3. Build VerifierMaybe for the engine
     let verifier = VerifierMaybe::new(HashAlgo::Sha256, expected_hash.to_string());
 
-    // 4. Start download with 4 segments and built-in verifier
+    // 4. Configure headers with Tor Browser / Mozilla User-Agent
+    let request_headers = RequestHeaders {
+        user_agent: Some(
+            "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0".to_string(),
+        ),
+        referrer: Some("https://linuxmint.com/".to_string()),
+        cookies: None,
+    };
+
+    // 5. Start download with 4 segments, verifier, and request headers
     let id = download_manager
-        .add_download(download_link.to_string(), filepath.clone(), 4, verifier)
+        .add_download(
+            download_link.to_string(),
+            filepath.clone(),
+            4,
+            verifier,
+            request_headers, // 👈 Passed RequestHeaders here
+        )
         .await
         .unwrap();
 
-    // 5. Poll until completed or failed
+    // 6. Poll until completed or failed
     loop {
         let status = download_manager
             .get_item_status(&id)
@@ -71,6 +88,6 @@ async fn test_download() {
         tokio::time::sleep(Duration::from_millis(1000)).await;
     }
 
-    // 6. Clean up test file
+    // 7. Clean up test file
     let _ = tokio::fs::remove_file(&filepath).await;
 }

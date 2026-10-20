@@ -1,5 +1,6 @@
 use downloader::download_manager::DownloadManager;
 use downloader::download_status::DownloadState;
+use downloader::request_headers::RequestHeaders;
 use downloader::verifier::{HashAlgo, VerifierMaybe};
 use log::info;
 use std::time::Duration;
@@ -40,15 +41,30 @@ async fn test_alpine_download_and_verify_sha256() {
     // 2. Build the verifier directly for the download engine
     let verifier = VerifierMaybe::new(HashAlgo::Sha256, expected_hash_str.to_string());
 
+    // 3. Configure headers with the Tor Browser / Firefox ESR User-Agent
+    let request_headers = RequestHeaders {
+        user_agent: Some(
+            "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0".to_string(),
+        ),
+        referrer: Some("https://alpinelinux.org/downloads/".to_string()),
+        cookies: None,
+    };
+
     info!("Starting Alpine minirootfs download to {:?}", target_path);
 
-    // 3. Add download with 4 segments and built-in verifier
+    // 4. Add download with 4 segments, verifier, and custom headers
     let id = download_manager
-        .add_download(download_url.to_string(), target_path.clone(), 4, verifier)
+        .add_download(
+            download_url.to_string(),
+            target_path.clone(),
+            4,
+            verifier,
+            request_headers, // 👈 Passed request headers here
+        )
         .await
         .expect("Failed to add download");
 
-    // 4. Poll until the engine finishes downloading and automatically verifies the checksum
+    // 5. Poll until the engine finishes downloading and automatically verifies the checksum
     loop {
         let status = download_manager
             .get_item_status(&id)
@@ -63,7 +79,6 @@ async fn test_alpine_download_and_verify_sha256() {
                 break;
             }
             DownloadState::Failed(err) => {
-                // Fails here if the checksum verification failed in spawn_blocking
                 panic!("Download or checksum verification failed: {:?}", err);
             }
             DownloadState::Running { download_speed } => {
@@ -78,7 +93,7 @@ async fn test_alpine_download_and_verify_sha256() {
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
 
-    // 5. Clean up temp file
+    // 6. Clean up temp file
     let _ = tokio::fs::remove_file(&target_path).await;
     info!("Verification test completed successfully. Test file cleaned up.");
 }

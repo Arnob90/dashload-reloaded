@@ -1,6 +1,7 @@
 use crate::download_data::DownloadData;
 use crate::download_status::DownloadState;
 use crate::in_place_segment::{InPlaceSegmentData, SegmentInfo};
+use crate::request_headers::RequestHeaders;
 use crate::serialization_error::DataSerializationError;
 use crate::verifier::VerifierMaybe;
 use std::collections::HashMap;
@@ -36,6 +37,7 @@ impl DownloadDataFactory {
         filesize: u64,
         num_segments: u64,
         verifier: VerifierMaybe,
+        request_headers: RequestHeaders,
     ) -> DownloadData {
         let segments = divide_into_segments(filesize, num_segments)
             .iter()
@@ -47,6 +49,7 @@ impl DownloadDataFactory {
                     end: i.end,
                 }),
                 last_downloaded: 0,
+                headers: request_headers.clone(),
             })
             .collect();
         DownloadData {
@@ -62,7 +65,12 @@ impl DownloadDataFactory {
     }
 
     /// Creates DownloadData for a normal (single-stream / unknown size) download
-    pub fn new_normal(url: String, filepath: PathBuf, verifier: VerifierMaybe) -> DownloadData {
+    pub fn new_normal(
+        url: String,
+        filepath: PathBuf,
+        verifier: VerifierMaybe,
+        request_headers: RequestHeaders,
+    ) -> DownloadData {
         DownloadData {
             url: url.clone(),
             filepath: filepath.clone(),
@@ -72,6 +80,7 @@ impl DownloadDataFactory {
                 filepath: filepath.clone(),
                 last_downloaded: 0,
                 info: None,
+                headers: request_headers,
             }],
             state: DownloadState::Running {
                 download_speed: 0.0,

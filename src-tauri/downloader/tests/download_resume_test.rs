@@ -1,5 +1,6 @@
 use downloader::download_manager::DownloadManager;
 use downloader::download_status::DownloadState;
+use downloader::request_headers::RequestHeaders;
 use downloader::verifier::VerifierMaybe;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -13,6 +14,17 @@ fn temp_filepath(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(filename)
 }
 
+/// Helper for sensible default headers (Tor Browser / Mozilla User-Agent)
+fn default_test_headers() -> RequestHeaders {
+    RequestHeaders {
+        user_agent: Some(
+            "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0".to_string(),
+        ),
+        referrer: Some("https://linuxmint.com/".to_string()),
+        cookies: None,
+    }
+}
+
 /// Test 1: Segmented Download Progress (N = 4)
 #[test_log::test(tokio::test)]
 async fn test_segmented_download_progress() {
@@ -20,9 +32,15 @@ async fn test_segmented_download_progress() {
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_segmented");
 
-    // Pass VerifierMaybe::none() (or VerifierMaybe { verifier: None })
+    // Pass VerifierMaybe::none() and default request headers
     let id = manager
-        .add_download(TEST_URL.to_string(), path.clone(), 4, VerifierMaybe::none())
+        .add_download(
+            TEST_URL.to_string(),
+            path.clone(),
+            4,
+            VerifierMaybe::none(),
+            default_test_headers(), // 👈 5th argument added
+        )
         .await
         .unwrap();
 
@@ -54,9 +72,15 @@ async fn test_pause_and_resume_lifecycle() {
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_resume");
 
-    // 1. Start download with VerifierMaybe::none()
+    // 1. Start download with VerifierMaybe::none() and request headers
     let id = manager
-        .add_download(TEST_URL.to_string(), path.clone(), 4, VerifierMaybe::none())
+        .add_download(
+            TEST_URL.to_string(),
+            path.clone(),
+            4,
+            VerifierMaybe::none(),
+            default_test_headers(), // 👈 5th argument added
+        )
         .await
         .unwrap();
 
@@ -72,7 +96,7 @@ async fn test_pause_and_resume_lifecycle() {
 
     let downloaded_at_pause = status_after_pause.downloaded;
 
-    // 3. Resume download (Async call)
+    // 3. Resume download (Async call - headers are preserved in snapshot)
     manager.resume(&id).await.unwrap();
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
@@ -101,9 +125,15 @@ async fn test_single_stream_download() {
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_single");
 
-    // 1 segment (N = 1) with VerifierMaybe::none()
+    // 1 segment (N = 1) with VerifierMaybe::none() and request headers
     let id = manager
-        .add_download(TEST_URL.to_string(), path.clone(), 1, VerifierMaybe::none())
+        .add_download(
+            TEST_URL.to_string(),
+            path.clone(),
+            1,
+            VerifierMaybe::none(),
+            default_test_headers(), // 👈 5th argument added
+        )
         .await
         .unwrap();
 

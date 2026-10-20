@@ -1,6 +1,7 @@
 use crate::download_run_error::DownloadRunError;
 use crate::download_status::{DownloadState, DownloadStatus};
 use crate::info_getters::get_filesize;
+use crate::request_headers::RequestHeaders;
 use crate::segmented_verifier::SegmentVerificationError;
 use bytes::Bytes;
 use reqwest::{Client, Response, StatusCode};
@@ -37,6 +38,7 @@ pub struct InPlaceSegmentData {
     pub filepath: PathBuf,
     pub last_downloaded: u64,
     pub info: Option<SegmentInfo>,
+    pub headers: RequestHeaders,
 }
 pub struct InPlaceSegment {
     data: InPlaceSegmentData,
@@ -161,6 +163,16 @@ impl InPlaceSegment {
         let range_header = get_range_header(&self.data);
         if let Some(header) = &range_header {
             req = req.header("Range", header);
+        }
+        let headers = &self.data.headers;
+        if let Some(cookies) = &headers.cookies {
+            req = req.header("Cookie", cookies);
+        }
+        if let Some(referrer) = &headers.referrer {
+            req = req.header("Referer", referrer);
+        }
+        if let Some(user_agent) = &headers.user_agent {
+            req = req.header("User-Agent", user_agent);
         }
         let mut res = req.send().await?;
         let status = res.status();
