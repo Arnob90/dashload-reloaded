@@ -1,0 +1,43 @@
+{
+	"$schema": "https://opencode.ai/config.json",
+	"agents": {
+		// 1. THE PLANNER: Read-only, uses native glob/grep/read tools
+		"planner": {
+			"description": "Analyzes backend Rust code and maps out TypeScript API signatures.",
+			"mode": "subagent",
+			// High-capacity free reasoning model on OpenRouter
+			"model": "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+			"system": "You are a precise system architect. Use native glob, grep, and read tools (NOT bash) to analyze the backend Rust commands. Write your exact execution plan and TypeScript API signatures directly into .opencode/plans/plan.md.",
+			"permissions": [
+				{
+					"action": "edit",
+					"resource": "*",
+					"effect": "deny"
+				},
+				{
+					"action": "shell",
+					"resource": "*",
+					"effect": "deny"
+				},
+				{
+					"action": "read",
+					"resource": "*",
+					"effect": "allow"
+				},
+				{
+					"action": "edit",
+					"resource": ".opencode/plans/**",
+					"effect": "allow"
+				}
+			]
+		},
+		// 2. THE BUILDER: Generates clean TS code from the plan
+		"builder": {
+			"description": "Implements the TypeScript bindings based on the structured plan.",
+			"mode": "subagent",
+			// Fast free model for code generation
+			"model": "openrouter/cohere/north-mini-code:free",
+			"system": "You are a clean code generator. Read .opencode/plans/plan.md and implement the TypeScript binding files based strictly on the approved plan."
+		}
+	}
+}

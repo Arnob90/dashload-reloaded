@@ -11,8 +11,11 @@ import {
     pause,
     resume,
     getData,
+    getItemStatus,
+    getConfigFile,
+    saveSession,
 } from "./apiCommunicate.ts"; // Your invoke file
-import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, VerifierMaybe } from "./typesOfBackend";
+import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, VerifierMaybe, RequestHeaders } from "./typesOfBackend";
 
 // ============================================================================
 // 1. Centralized Query Keys
@@ -88,13 +91,15 @@ export function useAddDownload() {
             url,
             filepath,
             numberOfSegments,
-            verifier
+            verifier,
+            requestHeaders
         }: {
             url: string;
             filepath: string;
             numberOfSegments: number;
             verifier: VerifierMaybe
-        }) => addDownload(url, filepath, numberOfSegments, verifier),
+            requestHeaders?: RequestHeaders
+        }) => addDownload(url, filepath, numberOfSegments, verifier, requestHeaders),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: downloadKeys.all })
         },
@@ -135,6 +140,27 @@ export function useResumeDownload() {
 export function useOpenFile() {
     return useMutation({
         mutationFn: openFile,
+    });
+}
+
+/** Gets the status of a specific download item */
+export function useGetItemStatus() {
+    return useMutation({
+        mutationFn: getItemStatus,
+    });
+}
+
+/** Gets the config file */
+export function useGetConfigFile() {
+    return useMutation({
+        mutationFn: getConfigFile,
+    });
+}
+
+/** Saves the current session */
+export function useSaveSession() {
+    return useMutation({
+        mutationFn: saveSession,
     });
 }
 // Base error guaranteed across ALL Tauri commands
