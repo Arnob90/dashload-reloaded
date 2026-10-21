@@ -1,5 +1,7 @@
 use downloader::listener::Server;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::commands::AppState;
 pub async fn start_server(app: AppHandle) {
     let (server, mut receiver) = Server::new(3000);
     tauri::async_runtime::spawn(async move {

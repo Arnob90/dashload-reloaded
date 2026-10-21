@@ -3,7 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
 import { MoreInfo } from "./moreInfo.tsx";
 import { useAddDownload, useOpenFile } from "../../code/useDownloads.ts";
-import { DownloadInfo, VerifierMaybe, HashAlgo } from "../../code/typesOfBackend.ts";
+import { DownloadInfo, VerifierMaybe, HashAlgo, RequestHeaders, DEFAULT_REQUEST_HEADERS } from "../../code/typesOfBackend.ts";
 import { joinPaths } from "../../code/utils.ts";
 import { notifications } from "@mantine/notifications";
 import { VerifierOptions } from "./verifierOptions.tsx";
@@ -51,12 +51,13 @@ export function RunDownloadDialog({ metadata, onSuccess }: RunDownloadDialogProp
     const startDownloadNow = useCallback(() => {
         const combinedFilepath = joinPaths(filepathToDownloadTo, filename);
         const effectiveSegments = metadata.segmented_possible ? numberOfSegments : 1;
-
+        const [requestHeaders, setRequestHeaders] = useState<RequestHeaders>(DEFAULT_REQUEST_HEADERS)
         addDownload.mutate({
             url: metadata.url,
             numberOfSegments: effectiveSegments,
             filepath: combinedFilepath,
-            verifier
+            verifier,
+            requestHeaders
         },
             {
                 onSuccess: onSuccess,
