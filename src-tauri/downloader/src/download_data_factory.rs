@@ -1,7 +1,10 @@
 use crate::download_data::DownloadData;
 use crate::download_status::DownloadState;
 use crate::in_place_segment::{InPlaceSegmentData, SegmentInfo};
+use crate::misc::clamp;
+use crate::request_headers::RequestHeaders;
 use crate::serialization_error::DataSerializationError;
+use crate::verifier::VerifierMaybe;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -12,7 +15,10 @@ struct Interval {
 }
 
 fn divide_into_segments(size: u64, num_segments: u64) -> Vec<Interval> {
-    let num_segments = num_segments.max(1).min(size);
+    if size == 0 {
+        panic!("Size must be greater than 0 to divide into segments.");
+    }
+    let num_segments = clamp(num_segments, 1, size);
     let chunk_size = size / num_segments;
     let mut intervals = Vec::new();
     for i in 0..num_segments {
@@ -34,6 +40,8 @@ impl DownloadDataFactory {
         filepath: PathBuf,
         filesize: u64,
         num_segments: u64,
+        verifier: VerifierMaybe,
+        request_headers: RequestHeaders,
     ) -> DownloadData {
         let segments = divide_into_segments(filesize, num_segments)
             .iter()
@@ -45,6 +53,7 @@ impl DownloadDataFactory {
                     end: i.end,
                 }),
                 last_downloaded: 0,
+                headers: request_headers.clone(),
             })
             .collect();
         DownloadData {
@@ -55,11 +64,17 @@ impl DownloadDataFactory {
             state: DownloadState::Running {
                 download_speed: 0.0,
             },
+            verifier,
         }
     }
 
     /// Creates DownloadData for a normal (single-stream / unknown size) download
-    pub fn new_normal(url: String, filepath: PathBuf) -> DownloadData {
+    pub fn new_normal(
+        url: String,
+        filepath: PathBuf,
+        verifier: VerifierMaybe,
+        request_headers: RequestHeaders,
+    ) -> DownloadData {
         DownloadData {
             url: url.clone(),
             filepath: filepath.clone(),
@@ -69,10 +84,12 @@ impl DownloadDataFactory {
                 filepath: filepath.clone(),
                 last_downloaded: 0,
                 info: None,
+                headers: request_headers,
             }],
             state: DownloadState::Running {
                 download_speed: 0.0,
             },
+            verifier,
         }
     }
     pub async fn deserialize_datas(

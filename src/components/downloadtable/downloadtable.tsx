@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActionIcon, Table, Text, Menu } from "@mantine/core";
+import { useCallback, useMemo, useState } from "react";
+import { ActionIcon, Table, Text, Menu, Group, Badge, Progress } from "@mantine/core";
 import { bytesToMIB } from "../../code/utils.ts";
 import {
     createColumnHelper,
@@ -8,146 +8,36 @@ import {
     rowSortingFeature,
     flexRender,
     SortingState,
-    tableFeatures
+    tableFeatures,
+    columnSizingFeature
 } from "@tanstack/react-table";
 import style from "./downloadtable.module.css";
 import { SelectableItemsTable } from "../selectabletable/selectableItemsTable.tsx";
 import {
-    useDownloadData,
-    useDownloadStatus,
     usePauseDownload,
     useResumeDownload,
 } from "../../code/useDownloads.ts";
 import { notifications } from "@mantine/notifications";
-import { ChevronRight, FolderOpen, Pause, Trash } from "lucide-react";
-import { revealItemInDir } from "@tauri-apps/plugin-opener"
-import type { DownloadState } from "../../code/typesOfBackend.ts";
+import { ChevronRight, FolderOpen, Pause, Trash, FileArchive, FileCode, File as DefaultFile } from "lucide-react";
+import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener"
+import { useTableEntries, TableEntry } from "./tableEntry.ts";
+import { formatTime } from "../../code/utils.ts";
 
-function formatTime(seconds: number): string {
-    if (seconds <= 0 || !isFinite(seconds)) return "-";
-
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-
-    const paddedHrs = String(hrs).padStart(2, "0");
-    const paddedMins = String(mins).padStart(2, "0");
-    const paddedSecs = String(secs).padStart(2, "0");
-
-    return `${paddedHrs}:${paddedMins}:${paddedSecs}`;
-}
-
-export interface TableEntry {
-    id: string;
-    filename: string;
-    downloaded: number;
-    total: number | null;
-    speed: number | null;
-    eta: number | null;
-    status: DownloadState;
-    downloadedPortion: number | null;
-    filepath: string
-}
-
-export function getFilenameFromPath(filepath: string): string {
-    return filepath.trim().replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "_";
-}
-
-export function calculateEta(
-    total: number | null,
-    downloaded: number,
-    speed: number | null
-): number | null {
-    if (total === null || speed === null || speed <= 0) {
-        return null;
-    }
-    const remaining = Math.max(0, total - downloaded);
-    return remaining / speed;
-}
-
-export function useTableEntries(): TableEntry[] | null {
-    const {
-        data: statusDatas,
-        isPending: isPendingStatus,
-        error: statusGettingError,
-    } = useDownloadStatus();
-
-    const {
-        data: downloadDatas,
-        isPending: isPendingDownload,
-        error: downloadDataGettingError,
-    } = useDownloadData();
-
-    useEffect(() => {
-        if (statusGettingError != null) {
-            notifications.show({
-                title: "Failed to get status",
-                message: statusGettingError.message,
-                color: "red",
-            });
-            console.log(statusGettingError)
-        }
-        if (downloadDataGettingError != null) {
-            notifications.show({
-                title: "Failed to fetch download data",
-                message: downloadDataGettingError.message,
-                color: "red",
-            });
-        }
-    }, [statusGettingError, downloadDataGettingError]);
-    const entries = useMemo(() => {
-        if (!statusDatas || !downloadDatas) return null;
-
-        const res: TableEntry[] = [];
-
-        for (const id of Object.keys(statusDatas)) {
-            const data = downloadDatas[id];
-            const status = statusDatas[id];
-
-            if (!data || !status) continue;
-
-            const calculatedSpeed =
-                status.state.kind === "Running"
-                    ? status.state.payload.download_speed
-                    : null;
-
-            const portion =
-                status.total && status.total > 0
-                    ? status.downloaded / status.total
-                    : null;
-
-            res.push({
-                id,
-                filename: getFilenameFromPath(data.filepath),
-                downloaded: status.downloaded,
-                total: status.total,
-                speed: calculatedSpeed,
-                eta: calculateEta(status.total, status.downloaded, calculatedSpeed),
-                status: status.state,
-                downloadedPortion: portion,
-                filepath: data.filepath
-            });
-        }
-        res.sort((a, b) => a.id.localeCompare(b.id));
-        return res;
-    }, [statusDatas, downloadDatas]);
-
-    if (
-        isPendingDownload ||
-        isPendingStatus ||
-        statusGettingError != null ||
-        downloadDataGettingError != null
-    ) {
-        return null;
-    }
-
-    return entries;
-}
-// ✅ Move OUTSIDE DownloadTable (at the top of the file)
 const features = tableFeatures({
     rowSortingFeature,
+    columnSizingFeature,
     sortedRowModel: createSortedRowModel(),
 });
+
+function getFileIcon(filename: string) {
+    if (filename.endsWith(".iso") || filename.endsWith(".tar.gz") || filename.endsWith(".zip")) {
+        return <FileArchive size={16} color="#4dabf7" />;
+    }
+    if (filename.endsWith(".exe") || filename.endsWith(".deb") || filename.endsWith(".rpm")) {
+        return <FileCode size={16} color="#ff922b" />;
+    }
+    return <DefaultFile size={16} color="#868e96" />;
+}
 
 const columnHelper = createColumnHelper<typeof features, TableEntry>();
 
@@ -155,14 +45,18 @@ export function DownloadTable() {
     const entries = useTableEntries();
     const tableData = useMemo(() => entries ?? [], [entries]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
-    const pauseMutation = usePauseDownload();
-    const resumeMutation = useResumeDownload();
+    const { mutate: pauseDownload } = usePauseDownload();
+    const { mutate: resumeDownload } = useResumeDownload();
     const [sorting, setSorting] = useState<SortingState>([])
     const handleOpenInFileManager = (path: string) => {
         revealItemInDir(path)
     }
+    const handleOpenFile = (path: string) => {
+        openPath(path)
+    }
     const handlePause = useCallback((id: string) => {
-        pauseMutation.mutate(id, {
+        console.log("Attempt pause for id:", id);
+        pauseDownload(id, {
             onError: (err) => {
                 notifications.show({
                     title: "Failed to Pause",
@@ -171,10 +65,10 @@ export function DownloadTable() {
                 });
             },
         });
-    }, [pauseMutation]);
+    }, [pauseDownload]);
 
     const handleResume = useCallback((id: string) => {
-        resumeMutation.mutate(id, {
+        resumeDownload(id, {
             onError: (err) => {
                 notifications.show({
                     title: "Failed to Resume",
@@ -183,12 +77,13 @@ export function DownloadTable() {
                 });
             },
         });
-    }, [resumeMutation]);
+    }, [resumeDownload]);
     const columns = useMemo(
         () => columnHelper.columns([
             columnHelper.display({
                 id: "actions",
                 header: "",
+                size: 50,
                 cell: (info) => {
                     const stateKind = info.row.original.status.kind;
 
@@ -200,8 +95,9 @@ export function DownloadTable() {
                                     e.stopPropagation(); // Prevents row selection toggle on button click
                                     handleResume(info.row.original.id);
                                 }}
+                                onMouseDown={(e) => e.stopPropagation()}
                             >
-                                <ChevronRight size={18} />
+                                <ChevronRight size={18} style={{ pointerEvents: "none" }} />
                             </ActionIcon>
                         );
                     }
@@ -215,7 +111,7 @@ export function DownloadTable() {
                                     handlePause(info.row.original.id);
                                 }}
                             >
-                                <Pause size={18} />
+                                <Pause size={18} style={{ pointerEvents: "none" }} />
                             </ActionIcon>
                         );
                     }
@@ -225,14 +121,35 @@ export function DownloadTable() {
             }),
             columnHelper.accessor("filename", {
                 header: "Filename",
-                cell: (info) => info.getValue(),
+                cell: (info) => (
+                    <Group gap="xs" wrap="nowrap">
+                        {getFileIcon(info.getValue())}
+                        <Text size="sm" fw={500} truncate maw={300}>
+                            {info.getValue()}
+                        </Text>
+                    </Group>
+                )
             }),
             columnHelper.accessor("status", {
                 header: "Status",
-                cell: (info) => info.getValue().kind,
+                size: 110,
+                cell: (info) => {
+                    const kind = info.getValue().kind
+                    const colorMap: Record<string, string> = {
+                        Running: "blue",
+                        Completed: "teal",
+                        Paused: "yellow",
+                        Failed: "red",
+                        Stopped: "gray"
+                    }
+                    return <Badge color={colorMap[kind]} variant="light" size="sm">
+                        {kind}
+                    </Badge>
+                },
             }),
             columnHelper.accessor("downloaded", {
                 header: "Downloaded",
+                size: 100,
                 cell: (info) => (
                     <Text>
                         {info.getValue() != null
@@ -243,6 +160,7 @@ export function DownloadTable() {
             }),
             columnHelper.accessor("total", {
                 header: "Total",
+                size: 100,
                 cell: (info) => (
                     <Text>
                         {info.getValue() != null
@@ -253,6 +171,7 @@ export function DownloadTable() {
             }),
             columnHelper.accessor("speed", {
                 header: "Speed",
+                size: 110,
                 cell: (info) => (
                     <Text>
                         {info.getValue() != null
@@ -261,15 +180,36 @@ export function DownloadTable() {
                     </Text>
                 ),
             }),
+            // In column definitions:
             columnHelper.accessor("downloadedPortion", {
-                header: "Progress",
-                cell: (info) => (
-                    <Text>
-                        {info.getValue() != null
-                            ? `${(info.getValue()! * 100).toFixed(1)}%`
-                            : "-"}
+                size: 180,
+                header: () => (
+                    <Text size="xs" fw={700} c={"dimmed"} tt="uppercase" ta={"center"}>
+                        Progress
                     </Text>
                 ),
+                cell: (info) => {
+                    const val = info.getValue();
+                    if (val === null) return <Text size="xs" c="dimmed">-</Text>;
+                    const pct = Math.round(val * 100);
+
+                    return (
+                        <Group gap="xs" wrap="nowrap" justify="center" mx="auto" style={{ width: "100%", maxHeight: 220 }}>
+                            <Progress
+                                value={pct}
+                                size="md" // 👈 8px thickness instead of 4px
+                                radius="xl" // 👈 Smooth pill corners
+                                color={pct === 100 ? "teal" : "blue"}
+                                striped={pct < 100 && pct > 0}
+                                animated={pct < 100 && pct > 0}
+                                style={{ flex: 1 }} // 👈 Automatically fills the available column space
+                            />
+                            <Text size="xs" fw={600} w={38} ta="right" c={pct === 100 ? "teal" : undefined}>
+                                {pct}%
+                            </Text>
+                        </Group>
+                    );
+                },
             }),
             columnHelper.accessor("eta", {
                 header: "ETA",
@@ -299,18 +239,20 @@ export function DownloadTable() {
     }
 
     return (
-        <SelectableItemsTable setSelectedId={setSelectedId}>
-            <Table.Thead>
+        <SelectableItemsTable setSelectedId={setSelectedId} verticalSpacing="sm" horizontalSpacing="md" highlightOnHover style={{ tableLayout: "auto" }}>
+            <Table.Thead bg="dark.8">
                 {tableModel.getHeaderGroups().map((headerGroup) => (
                     <Table.Tr key={headerGroup.id}>
                         {headerGroup.headers.map((header) => (
                             <Table.Th key={header.id}>
-                                {header.isPlaceholder
-                                    ? null
-                                    : flexRender(
-                                        header.column.columnDef.header,
-                                        header.getContext()
-                                    )}
+                                <Text size="xs" fw={700} c="dimmed" tt="uppercase">
+                                    {header.isPlaceholder
+                                        ? null
+                                        : flexRender(
+                                            header.column.columnDef.header,
+                                            header.getContext()
+                                        )}
+                                </Text>
                             </Table.Th>
                         ))}
                     </Table.Tr>
@@ -344,6 +286,9 @@ export function DownloadTable() {
                             </Table.Tr>
                         </Menu.ContextMenu>
                         <Menu.Dropdown>
+                            <Menu.Item onClick={() => handleOpenFile(row.original.filepath)}>
+                                Open File
+                            </Menu.Item>
                             <Menu.Item leftSection={<FolderOpen size={16} />}
                                 onClick={() => handleOpenInFileManager(row.original.filepath)}
                             >

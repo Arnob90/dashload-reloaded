@@ -11,8 +11,11 @@ import {
     pause,
     resume,
     getData,
+    getItemStatus,
+    getConfigFile,
+    saveSession,
 } from "./apiCommunicate.ts"; // Your invoke file
-import type { DownloadStatusMap, DownloadInfo, DownloadDataMap } from "./typesOfBackend";
+import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, VerifierMaybe, RequestHeaders } from "./typesOfBackend";
 
 // ============================================================================
 // 1. Centralized Query Keys
@@ -45,11 +48,16 @@ export function useDownloadStatus(pollIntervalMs = 300) {
  * Fetches metadata (filename, filesize, range support) for a given URL.
  * Only executes when a non-empty URL is provided.
  */
-export function useDownloadMetadata(url: string) {
+export function useDownloadMetadata(url: string | undefined) {
     return useQuery<DownloadInfo>({
-        queryKey: downloadKeys.metadata(url),
-        queryFn: () => getDownloadMetadata(url),
-        enabled: Boolean(url && url.trim().length > 0),
+        queryKey: downloadKeys.metadata(url ?? ""),
+        queryFn: () => {
+            if (!url?.trim()) {
+                throw new Error("A non empty URL is required to fetch metadata.");
+            }
+            return getDownloadMetadata(url);
+        },
+        enabled: Boolean(url?.trim()),
         staleTime: 1000 * 60 * 5, // Cache metadata for 5 minutes
     });
 }
@@ -88,11 +96,15 @@ export function useAddDownload() {
             url,
             filepath,
             numberOfSegments,
+            verifier,
+            requestHeaders
         }: {
             url: string;
             filepath: string;
             numberOfSegments: number;
-        }) => addDownload(url, filepath, numberOfSegments),
+            verifier: VerifierMaybe
+            requestHeaders?: RequestHeaders
+        }) => addDownload(url, filepath, numberOfSegments, verifier, requestHeaders),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: downloadKeys.all })
         },
@@ -133,6 +145,27 @@ export function useResumeDownload() {
 export function useOpenFile() {
     return useMutation({
         mutationFn: openFile,
+    });
+}
+
+/** Gets the status of a specific download item */
+export function useGetItemStatus() {
+    return useMutation({
+        mutationFn: getItemStatus,
+    });
+}
+
+/** Gets the config file */
+export function useGetConfigFile() {
+    return useMutation({
+        mutationFn: getConfigFile,
+    });
+}
+
+/** Saves the current session */
+export function useSaveSession() {
+    return useMutation({
+        mutationFn: saveSession,
     });
 }
 // Base error guaranteed across ALL Tauri commands

@@ -1,5 +1,7 @@
 use downloader::download_manager::DownloadManager;
 use downloader::download_status::DownloadState;
+use downloader::request_headers::RequestHeaders;
+use downloader::verifier::VerifierMaybe;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -12,6 +14,17 @@ fn temp_filepath(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(filename)
 }
 
+/// Helper for sensible default headers (Tor Browser / Mozilla User-Agent)
+fn default_test_headers() -> RequestHeaders {
+    RequestHeaders {
+        user_agent: Some(
+            "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0".to_string(),
+        ),
+        referrer: Some("https://linuxmint.com/".to_string()),
+        cookies: None,
+    }
+}
+
 /// Test 1: Segmented Download Progress (N = 4)
 #[test_log::test(tokio::test)]
 async fn test_segmented_download_progress() {
@@ -19,8 +32,15 @@ async fn test_segmented_download_progress() {
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_segmented");
 
+    // Pass VerifierMaybe::none() and default request headers
     let id = manager
-        .add_download(TEST_URL.to_string(), path.clone(), 4)
+        .add_download(
+            TEST_URL.to_string(),
+            path.clone(),
+            4,
+            VerifierMaybe::none(),
+            default_test_headers(), // 👈 5th argument added
+        )
         .await
         .unwrap();
 
@@ -52,32 +72,35 @@ async fn test_pause_and_resume_lifecycle() {
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_resume");
 
-    // 1. Start download
     let id = manager
-        .add_download(TEST_URL.to_string(), path.clone(), 4)
+        .add_download(
+            TEST_URL.to_string(),
+            path.clone(),
+            4,
+            VerifierMaybe::none(),
+            default_test_headers(),
+        )
         .await
         .unwrap();
 
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
-    // 2. Pause download (Synchronous call)
+    // 1. First pause
+    let first_pause_started = tokio::time::Instant::now();
     manager.pause(&id).unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let status_after_pause = manager.get_item_status(&id).unwrap();
-    log::info!("Status after pause: {:?}", status_after_pause.state);
-    assert_eq!(status_after_pause.state, DownloadState::Paused);
-
-    let downloaded_at_pause = status_after_pause.downloaded;
-
-    // 3. Resume download (Async call)
+    while manager.get_item_status(&id).unwrap().state != DownloadState::Paused {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let downloaded_at_pause = manager.get_item_status(&id).unwrap().downloaded;
+    let first_pause_elapsed = first_pause_started.elapsed();
+    log::info!("First pause took {:?}", first_pause_elapsed);
+    // 2. Resume
     manager.resume(&id).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     let status_after_resume = manager.get_item_status(&id).unwrap();
     log::info!("Status after resume: {:?}", status_after_resume.state);
 
-    // Verify state is Running again and downloaded bytes continued from offset
     assert!(matches!(
         status_after_resume.state,
         DownloadState::Running { .. }
@@ -87,19 +110,43 @@ async fn test_pause_and_resume_lifecycle() {
         "Downloaded bytes should resume from paused progress"
     );
 
+    // 3. Second pause — measure the time spent inside pause()
+    let second_pause_started = tokio::time::Instant::now();
+    manager.pause(&id).unwrap();
+    while manager.get_item_status(&id).unwrap().state != DownloadState::Paused {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let second_pause_elapsed = second_pause_started.elapsed();
+
+    log::info!("Second pause took {:?}", second_pause_elapsed);
+    let status_after_second_pause = manager.get_item_status(&id).unwrap();
+    log::info!(
+        "Status after second pause: {:?}",
+        status_after_second_pause.state
+    );
+    assert_eq!(status_after_second_pause.state, DownloadState::Paused);
+
     // Clean up
     let _ = manager.pause(&id);
     let _ = tokio::fs::remove_file(&path).await;
 }
 
+/// Test 3: Single Stream Fallback (N = 1)
 #[test_log::test(tokio::test)]
 async fn test_single_stream_download() {
     let client = reqwest::Client::new();
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_single");
 
+    // 1 segment (N = 1) with VerifierMaybe::none() and request headers
     let id = manager
-        .add_download(TEST_URL.to_string(), path.clone(), 1)
+        .add_download(
+            TEST_URL.to_string(),
+            path.clone(),
+            1,
+            VerifierMaybe::none(),
+            default_test_headers(),
+        )
         .await
         .unwrap();
 

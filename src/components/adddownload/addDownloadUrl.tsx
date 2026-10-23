@@ -1,10 +1,10 @@
 import { Input, Text, Flex, LoadingOverlay, Button } from "@mantine/core";
-import { DownloadInfo, DownloadInfoGetError, DownloadInfoGetErrorSchema } from "../../code/typesOfBackend";
+import { DownloadInfo, DownloadInfoGetApiError, DownloadInfoGetApiErrorSchema } from "../../code/typesOfBackend";
 import { useState } from "react";
 import { useFetchMetadata } from "../../code/useDownloads";
 import { notifications } from "@mantine/notifications";
 export interface AddDownloadProps {
-    error?: DownloadInfoGetError,
+    error?: DownloadInfoGetApiError,
     submitMetadata?: (info: DownloadInfo) => void;
 }
 
@@ -17,7 +17,7 @@ export function AddDownloadUrl({ submitMetadata, error: err }: AddDownloadProps)
             submitMetadata?.(metadata)
         }
         catch (err) {
-            const errParsed = DownloadInfoGetErrorSchema.parse(err)
+            const errParsed = DownloadInfoGetApiErrorSchema.parse(err)
             notifications.show({
                 title: "Download Failed",
                 message: `Failed to get information. Kind:${errParsed.kind} ,Reason: ${errParsed.message}`

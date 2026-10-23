@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::{download_status::DownloadState, in_place_segment::InPlaceSegmentData};
+use crate::{
+    download_status::DownloadState, in_place_segment::InPlaceSegmentData, verifier::VerifierMaybe,
+};
 use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DownloadData {
@@ -9,4 +11,5 @@ pub struct DownloadData {
     pub segments: Vec<InPlaceSegmentData>,
     pub length: Option<u64>,
     pub state: DownloadState,
+    pub verifier: VerifierMaybe,
 }

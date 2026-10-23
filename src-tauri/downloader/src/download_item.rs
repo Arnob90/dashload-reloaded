@@ -2,7 +2,8 @@ use crate::download_data::DownloadData;
 use crate::download_run_error::DownloadRunError;
 use crate::download_status::{DownloadState, DownloadStatus};
 use crate::in_place_segment::{InPlaceSegment, SegmentCommand};
-use futures::future::join_all;
+use crate::verifier::VerifierMaybe;
+use futures::future::try_join_all;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
@@ -12,6 +13,13 @@ pub enum CreateOpts {
     Segmented { num_segments: u64, filesize: u64 },
     Normal,
 }
+
+pub enum VerificationState {
+    Verifying,
+    Verified,
+    VerifyFailed,
+}
+
 pub struct DownloadItem {
     pub segments: Vec<InPlaceSegment>,
     pub status_receivers: Vec<tokio::sync::watch::Receiver<DownloadStatus>>,
@@ -19,6 +27,9 @@ pub struct DownloadItem {
     pub url: String,
     pub polling_rate_ms: u64,
     pub segment_command_sender: watch::Sender<SegmentCommand>,
+    pub verifier: VerifierMaybe,
+    pub verify_result_receiver: watch::Receiver<VerificationState>,
+    pub verify_result_sender: watch::Sender<VerificationState>,
 }
 
 impl DownloadItem {
@@ -67,6 +78,7 @@ impl DownloadItem {
             segments.push(segment);
             status_receivers.push(rx);
         }
+        let (sender, receiver) = watch::channel(VerificationState::Verifying);
 
         let item = Arc::new(Self {
             segments,
@@ -75,6 +87,9 @@ impl DownloadItem {
             url: download_data.url,
             polling_rate_ms,
             segment_command_sender: segment_commander,
+            verifier: download_data.verifier.clone(),
+            verify_result_receiver: receiver,
+            verify_result_sender: sender,
         });
         Ok(item)
     }
@@ -85,18 +100,28 @@ impl DownloadItem {
         }
 
         // Run all segment workers concurrently
-        let results = join_all(futures).await;
+        let results = try_join_all(futures).await;
         // Delete the file for a stop command
         if *self.segment_command_sender.borrow() == SegmentCommand::Stop {
             //TODO: Warn user if file deletion fails
             let _ = tokio::fs::remove_file(&self.filepath).await;
         }
-
-        // Propagate the first error encountered, if any
-        for result in results {
-            result?;
+        results?;
+        let verify_clone = self.verifier.clone();
+        let filepath_clone = self.filepath.clone();
+        let verified = tokio::task::spawn_blocking(move || verify_clone.verify(&filepath_clone))
+            .await
+            .map_err(|e| DownloadRunError::DiskError(format!("Verification task panicked {}", e)))?
+            .map_err(|e| {
+                DownloadRunError::DiskError(format!("IO error during validation {}", e))
+            })?;
+        if !verified {
+            let _ = self
+                .verify_result_sender
+                .send(VerificationState::VerifyFailed);
+            return Err(DownloadRunError::VerifyError);
         }
-
+        let _ = self.verify_result_sender.send(VerificationState::Verified);
         Ok(())
     }
 
@@ -138,10 +163,11 @@ impl DownloadItem {
                     all_completed = false;
                     any_stopped = true
                 }
+                DownloadState::Verifying => {}
             }
         }
 
-        let overall_state = if let Some(err) = any_failed {
+        let mut overall_state = if let Some(err) = any_failed {
             DownloadState::Failed(err)
         } else if all_completed {
             DownloadState::Completed {
@@ -156,6 +182,15 @@ impl DownloadItem {
                 download_speed: total_speed,
             }
         };
+        if let DownloadState::Completed { .. } = overall_state {
+            overall_state = match *self.verify_result_receiver.borrow() {
+                VerificationState::Verifying => DownloadState::Verifying,
+                VerificationState::VerifyFailed => {
+                    DownloadState::Failed(DownloadRunError::VerifyError)
+                }
+                VerificationState::Verified => overall_state,
+            }
+        }
 
         DownloadStatus {
             total: total_filesize,
@@ -176,6 +211,7 @@ impl DownloadItem {
                 .map(|segment| segment.snapshot())
                 .collect(),
             state: self.get_status().state,
+            verifier: self.verifier.clone(),
         }
     }
 
