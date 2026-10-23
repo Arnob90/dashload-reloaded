@@ -73,17 +73,18 @@ impl DownloadManager {
         request_headers: RequestHeaders,
     ) -> Result<String, ManagerError> {
         // 1. Fetch filesize. Fallback to `new_normal` (N=1) if unknown!
-        let data = match info_getters::get_filesize(self.client.clone(), &url).await {
-            Some(filesize) => DownloadDataFactory::new_segmented(
-                url,
-                filepath,
-                filesize,
-                number_of_segments,
-                verifier,
-                request_headers,
-            ),
-            None => DownloadDataFactory::new_normal(url, filepath, verifier, request_headers),
-        };
+        let data =
+            match info_getters::get_filesize(self.client.clone(), &url, &request_headers).await {
+                Some(filesize) => DownloadDataFactory::new_segmented(
+                    url,
+                    filepath,
+                    filesize,
+                    number_of_segments,
+                    verifier,
+                    request_headers,
+                ),
+                None => DownloadDataFactory::new_normal(url, filepath, verifier, request_headers),
+            };
 
         // 2. Construct the DownloadItem
         let item = DownloadItem::create_from_data(self.client.clone(), data, self.poll_every_ms)

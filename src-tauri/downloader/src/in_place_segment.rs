@@ -69,7 +69,7 @@ impl InPlaceSegment {
         if let Some(info) = &data.info {
             return Some(info.size());
         }
-        get_filesize(client, &data.url).await
+        get_filesize(client, &data.url, &data.headers).await
     }
     pub async fn new(
         client: reqwest::Client,

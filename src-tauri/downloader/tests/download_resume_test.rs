@@ -72,38 +72,35 @@ async fn test_pause_and_resume_lifecycle() {
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_resume");
 
-    // 1. Start download with VerifierMaybe::none() and request headers
     let id = manager
         .add_download(
             TEST_URL.to_string(),
             path.clone(),
             4,
             VerifierMaybe::none(),
-            default_test_headers(), // 👈 5th argument added
+            default_test_headers(),
         )
         .await
         .unwrap();
 
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
-    // 2. Pause download (Synchronous call)
+    // 1. First pause
+    let first_pause_started = tokio::time::Instant::now();
     manager.pause(&id).unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let status_after_pause = manager.get_item_status(&id).unwrap();
-    log::info!("Status after pause: {:?}", status_after_pause.state);
-    assert_eq!(status_after_pause.state, DownloadState::Paused);
-
-    let downloaded_at_pause = status_after_pause.downloaded;
-
-    // 3. Resume download (Async call - headers are preserved in snapshot)
+    while manager.get_item_status(&id).unwrap().state != DownloadState::Paused {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let downloaded_at_pause = manager.get_item_status(&id).unwrap().downloaded;
+    let first_pause_elapsed = first_pause_started.elapsed();
+    log::info!("First pause took {:?}", first_pause_elapsed);
+    // 2. Resume
     manager.resume(&id).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     let status_after_resume = manager.get_item_status(&id).unwrap();
     log::info!("Status after resume: {:?}", status_after_resume.state);
 
-    // Verify state is Running again and downloaded bytes continued from offset
     assert!(matches!(
         status_after_resume.state,
         DownloadState::Running { .. }
@@ -112,6 +109,22 @@ async fn test_pause_and_resume_lifecycle() {
         status_after_resume.downloaded >= downloaded_at_pause,
         "Downloaded bytes should resume from paused progress"
     );
+
+    // 3. Second pause — measure the time spent inside pause()
+    let second_pause_started = tokio::time::Instant::now();
+    manager.pause(&id).unwrap();
+    while manager.get_item_status(&id).unwrap().state != DownloadState::Paused {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let second_pause_elapsed = second_pause_started.elapsed();
+
+    log::info!("Second pause took {:?}", second_pause_elapsed);
+    let status_after_second_pause = manager.get_item_status(&id).unwrap();
+    log::info!(
+        "Status after second pause: {:?}",
+        status_after_second_pause.state
+    );
+    assert_eq!(status_after_second_pause.state, DownloadState::Paused);
 
     // Clean up
     let _ = manager.pause(&id);
@@ -132,7 +145,7 @@ async fn test_single_stream_download() {
             path.clone(),
             1,
             VerifierMaybe::none(),
-            default_test_headers(), // 👈 5th argument added
+            default_test_headers(),
         )
         .await
         .unwrap();

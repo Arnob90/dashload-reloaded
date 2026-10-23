@@ -1,6 +1,8 @@
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::request_headers::RequestHeaders;
+
 #[derive(Error, Debug, Serialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum FilepathGettingError {
@@ -58,11 +60,21 @@ pub async fn get_filename_from_url(
     Err(FilepathGettingError::Filenameless)
 }
 
-pub async fn get_filesize(client: reqwest::Client, url: &str) -> Option<u64> {
-    client
-        .head(url)
-        .send()
+pub async fn get_filesize(
+    client: reqwest::Client,
+    url: &str,
+    headers: &RequestHeaders,
+) -> Option<u64> {
+    let mut req = client.head(url);
+    let header_map_result = headers.to_header_map();
+    if let Ok(header_map) = header_map_result {
+        req = req.headers(header_map);
+    }
+    req.send()
         .await
-        .ok()
-        .and_then(|r| r.content_length())
+        .ok()?
+        .headers()
+        .get("Content-Length")
+        .and_then(|len| len.to_str().ok())
+        .and_then(|len_str| len_str.parse::<u64>().ok())
 }

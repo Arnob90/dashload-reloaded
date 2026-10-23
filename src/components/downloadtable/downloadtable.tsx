@@ -45,8 +45,8 @@ export function DownloadTable() {
     const entries = useTableEntries();
     const tableData = useMemo(() => entries ?? [], [entries]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
-    const pauseMutation = usePauseDownload();
-    const resumeMutation = useResumeDownload();
+    const { mutate: pauseDownload } = usePauseDownload();
+    const { mutate: resumeDownload } = useResumeDownload();
     const [sorting, setSorting] = useState<SortingState>([])
     const handleOpenInFileManager = (path: string) => {
         revealItemInDir(path)
@@ -55,7 +55,8 @@ export function DownloadTable() {
         openPath(path)
     }
     const handlePause = useCallback((id: string) => {
-        pauseMutation.mutate(id, {
+        console.log("Attempt pause for id:", id);
+        pauseDownload(id, {
             onError: (err) => {
                 notifications.show({
                     title: "Failed to Pause",
@@ -64,10 +65,10 @@ export function DownloadTable() {
                 });
             },
         });
-    }, [pauseMutation]);
+    }, [pauseDownload]);
 
     const handleResume = useCallback((id: string) => {
-        resumeMutation.mutate(id, {
+        resumeDownload(id, {
             onError: (err) => {
                 notifications.show({
                     title: "Failed to Resume",
@@ -76,7 +77,7 @@ export function DownloadTable() {
                 });
             },
         });
-    }, [resumeMutation]);
+    }, [resumeDownload]);
     const columns = useMemo(
         () => columnHelper.columns([
             columnHelper.display({
@@ -94,8 +95,9 @@ export function DownloadTable() {
                                     e.stopPropagation(); // Prevents row selection toggle on button click
                                     handleResume(info.row.original.id);
                                 }}
+                                onMouseDown={(e) => e.stopPropagation()}
                             >
-                                <ChevronRight size={18} />
+                                <ChevronRight size={18} style={{ pointerEvents: "none" }} />
                             </ActionIcon>
                         );
                     }
@@ -109,7 +111,7 @@ export function DownloadTable() {
                                     handlePause(info.row.original.id);
                                 }}
                             >
-                                <Pause size={18} />
+                                <Pause size={18} style={{ pointerEvents: "none" }} />
                             </ActionIcon>
                         );
                     }

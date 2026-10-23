@@ -9,6 +9,7 @@ import { AddDownload } from "./components/adddownload/addDownloadMain";
 import { useDisclosure } from "@mantine/hooks";
 import { DownloadTable } from "./components/downloadtable/downloadtable";
 import { ErrorBoundary, getErrorMessage } from "react-error-boundary"
+import { ExtensionRequestDownload } from "./components/adddownload/addDownloadOnExtensionRequest";
 const theme = createTheme({
     fontFamily: 'Inter, sans-serif',
     primaryColor: 'cyan',
@@ -32,6 +33,7 @@ function App() {
                     <Notifications />
                     <DownloadHeader onClickAddDownload={openAddDownloadDialog} />
                     <AddDownload opened={addDownloadDialogOpened} onClose={closeAddDownloadDialog} />
+                    <ExtensionRequestDownload requestMap={requestMap} />
                     <DownloadTable />
                 </Flex>
             </MantineProvider>

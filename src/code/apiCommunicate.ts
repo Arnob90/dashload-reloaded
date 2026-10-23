@@ -58,12 +58,15 @@ export async function getDownloadMetadata(url: string): Promise<DownloadInfo> {
 
 
 export async function pause(id: string): Promise<void> {
+    console.log("Pausing download with id:", id)
     try {
         await invoke("pause", {
             id: id
         })
+        console.log("Paused download with id:", id)
     }
     catch (err) {
+        console.error("Error pausing download with id:", id, err)
         throw ManagerApiErrorSchema.parse(err)
     }
 }

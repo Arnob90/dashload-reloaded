@@ -42,7 +42,7 @@
 			"mode": "subagent",
 			// Fast free model for code generation
 			"model": "openrouter/cohere/north-mini-code:free",
-			"system": "You are a clean code generator. Read .opencode/plans/plan.md and implement the TypeScript binding files based strictly on the approved plan."
+			"system": "You are an implementation specialist. CRITICAL RULES:\n1. Read .opencode/plans/ carefully before making changes.\n2. STRICT SCOPE BOUNDARY: ONLY modify files explicitly listed in the execution plan.\n3. DO NOT refactor, rename, format, or 'improve' unrequested code, dependencies, or configuration files.\n4. DO NOT run build or package scripts unless specifically requested by the user.\n5. If a plan requires touching an unmentioned file, stop and request user approval."
 		}
 	}
 }

@@ -1,5 +1,5 @@
 import { Box, TextInput, Flex, ActionIcon, Button, LoadingOverlay, NumberInput } from "@mantine/core";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Folder } from "lucide-react";
 import { MoreInfo } from "./moreInfo.tsx";
 import { useAddDownload, useOpenFile } from "../../code/useDownloads.ts";
@@ -33,7 +33,7 @@ export function RunDownloadDialog({ metadata, onSuccess, headers, setHeaders }: 
         } satisfies VerifierMaybe
     }, [chosenAlgo, hash])
     const openFileMutation = useOpenFile();
-    const addDownload = useAddDownload();
+    const { mutate: addDownload, isPending: addDownloadPending } = useAddDownload();
 
     const chooseFolderByPrompt = async () => {
         try {
@@ -50,10 +50,10 @@ export function RunDownloadDialog({ metadata, onSuccess, headers, setHeaders }: 
         }
     };
 
-    const startDownloadNow = useCallback(() => {
+    const startDownloadNow = () => {
         const combinedFilepath = joinPaths(filepathToDownloadTo, filename);
         const effectiveSegments = metadata.segmented_possible ? numberOfSegments : 1;
-        addDownload.mutate({
+        addDownload({
             url: metadata.url,
             numberOfSegments: effectiveSegments,
             filepath: combinedFilepath,
@@ -72,12 +72,12 @@ export function RunDownloadDialog({ metadata, onSuccess, headers, setHeaders }: 
             }
         );
 
-    }, [metadata, verifier, filepathToDownloadTo, filename, numberOfSegments]);
+    }
 
     return (
         <Box pos="relative">
             <LoadingOverlay
-                visible={openFileMutation.isPending || addDownload.isPending}
+                visible={openFileMutation.isPending || addDownloadPending}
                 zIndex={1000}
                 overlayProps={{ radius: "sm", blur: 2 }}
             />

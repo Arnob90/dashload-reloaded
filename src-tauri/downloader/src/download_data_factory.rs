@@ -1,6 +1,7 @@
 use crate::download_data::DownloadData;
 use crate::download_status::DownloadState;
 use crate::in_place_segment::{InPlaceSegmentData, SegmentInfo};
+use crate::misc::clamp;
 use crate::request_headers::RequestHeaders;
 use crate::serialization_error::DataSerializationError;
 use crate::verifier::VerifierMaybe;
@@ -14,7 +15,10 @@ struct Interval {
 }
 
 fn divide_into_segments(size: u64, num_segments: u64) -> Vec<Interval> {
-    let num_segments = num_segments.max(1).min(size);
+    if size == 0 {
+        panic!("Size must be greater than 0 to divide into segments.");
+    }
+    let num_segments = clamp(num_segments, 1, size);
     let chunk_size = size / num_segments;
     let mut intervals = Vec::new();
     for i in 0..num_segments {

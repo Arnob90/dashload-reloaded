@@ -38,7 +38,7 @@ impl Server {
             .route("/download", post(handle_download_request))
             .with_state(self.state); // Inject state into Axum router
 
-        let addr = format!("0.0.0.0:{}", self.port);
+        let addr = format!("127.0.0.1:{}", self.port);
         let listener = TcpListener::bind(&addr)
             .await
             .map_err(|_| ServerError::ServerStartError)?;
