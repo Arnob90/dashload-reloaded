@@ -24,7 +24,11 @@ export const DEFAULT_REQUEST_HEADERS: RequestHeaders = { cookies: null, referrer
 // ============================================================================
 // 2. Config
 // ============================================================================
-export const ConfigSchema = z.object({ auto_add_download: z.boolean() });
+export const ConfigSchema = z.object({
+    auto_add_download: z.boolean(),
+    default_download_path: z.string(),
+    default_number_of_segments: z.number()
+});
 export type Config = z.infer<typeof ConfigSchema>;
 
 // ============================================================================
@@ -222,4 +226,11 @@ export type DownloadDataMap = z.infer<typeof DownloadDataMapSchema>
 // Export new schemas that are used in apiCommunicate.ts
 export const DataSerializationApiErrorSchema = withApiMessage(DataSerializationErrorSchema);
 export type DataSerializationApiError = z.infer<typeof DataSerializationApiErrorSchema>;
+export const ExternalDownloadRequestSchema = z.object({
+    url: z.string(),
+    filename: z.string().nullable(),
+    filesize: z.number().nullable(),
+    headers: RequestHeadersSchema,
+})
+export type ExternalDownloadRequest = z.infer<typeof ExternalDownloadRequestSchema>;
 

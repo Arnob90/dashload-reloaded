@@ -48,11 +48,16 @@ export function useDownloadStatus(pollIntervalMs = 300) {
  * Fetches metadata (filename, filesize, range support) for a given URL.
  * Only executes when a non-empty URL is provided.
  */
-export function useDownloadMetadata(url: string) {
+export function useDownloadMetadata(url: string | undefined) {
     return useQuery<DownloadInfo>({
-        queryKey: downloadKeys.metadata(url),
-        queryFn: () => getDownloadMetadata(url),
-        enabled: Boolean(url && url.trim().length > 0),
+        queryKey: downloadKeys.metadata(url ?? ""),
+        queryFn: () => {
+            if (!url?.trim()) {
+                throw new Error("A non empty URL is required to fetch metadata.");
+            }
+            return getDownloadMetadata(url);
+        },
+        enabled: Boolean(url?.trim()),
         staleTime: 1000 * 60 * 5, // Cache metadata for 5 minutes
     });
 }

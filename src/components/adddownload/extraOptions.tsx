@@ -40,7 +40,7 @@ export function CollapsibleSection({
             </Flex>
 
             {/* --- 5. The Content is now a sibling, placed after the trigger --- */}
-            <Collapse in={isOpen}>
+            <Collapse expanded={isOpen}>
                 {/* It's good practice to add some margin to the content */}
                 <Box mt="sm" ml="lg">
                     {children}

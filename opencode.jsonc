@@ -28,6 +28,11 @@
 					"action": "edit",
 					"resource": ".opencode/plans/**",
 					"effect": "allow"
+				},
+				{
+					"action": "edit",
+					"resource": ".opencode/reviews/**",
+					"effect": "allow"
 				}
 			]
 		},

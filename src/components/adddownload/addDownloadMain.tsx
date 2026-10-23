@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Modal } from "@mantine/core";
-import { DownloadInfo } from "../../code/typesOfBackend";
+import { DEFAULT_REQUEST_HEADERS, DownloadInfo, RequestHeaders } from "../../code/typesOfBackend";
 import { AddDownloadUrl } from "./addDownloadUrl";
 import { RunDownloadDialog } from "./runDownload";
 
@@ -11,6 +11,7 @@ interface AddDownloadProps {
 
 export function AddDownload({ opened, onClose }: AddDownloadProps) {
     const [currentMetadata, setMetadata] = useState<DownloadInfo | undefined>()
+    const [headers, setHeaders] = useState<RequestHeaders>(DEFAULT_REQUEST_HEADERS)
     return (
         <Modal
             opened={opened}
@@ -24,7 +25,7 @@ export function AddDownload({ opened, onClose }: AddDownloadProps) {
                 <RunDownloadDialog metadata={currentMetadata} onSuccess={() => {
                     setMetadata(undefined)
                     onClose()
-                }} />
+                }} headers={headers} setHeaders={setHeaders} />
             )}
         </Modal>
     )
