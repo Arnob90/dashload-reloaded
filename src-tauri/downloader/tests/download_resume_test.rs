@@ -1,7 +1,7 @@
-use downloader::download_manager::DownloadManager;
-use downloader::download_status::DownloadState;
-use downloader::request_headers::RequestHeaders;
-use downloader::verifier::VerifierMaybe;
+use dashload_downloader::download_manager::DownloadManager;
+use dashload_downloader::download_status::DownloadState;
+use dashload_downloader::request_headers::RequestHeaders;
+use dashload_downloader::verifier::VerifierMaybe;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -27,6 +27,7 @@ fn default_test_headers() -> RequestHeaders {
 
 /// Test 1: Segmented Download Progress (N = 4)
 #[test_log::test(tokio::test)]
+#[ignore = "Live Network Test"]
 async fn test_segmented_download_progress() {
     let client = reqwest::Client::new();
     let manager = DownloadManager::new(client, 200);
@@ -67,6 +68,7 @@ async fn test_segmented_download_progress() {
 
 /// Test 2: Pause and Resume Lifecycle
 #[test_log::test(tokio::test)]
+#[ignore = "Live Network Test"]
 async fn test_pause_and_resume_lifecycle() {
     let client = reqwest::Client::new();
     let manager = DownloadManager::new(client, 200);
@@ -133,11 +135,11 @@ async fn test_pause_and_resume_lifecycle() {
 
 /// Test 3: Single Stream Fallback (N = 1)
 #[test_log::test(tokio::test)]
+#[ignore = "Live Network Test"]
 async fn test_single_stream_download() {
     let client = reqwest::Client::new();
     let manager = DownloadManager::new(client, 200);
     let path = temp_filepath("mint_single");
-
     // 1 segment (N = 1) with VerifierMaybe::none() and request headers
     let id = manager
         .add_download(

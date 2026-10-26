@@ -9,30 +9,46 @@ use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::watch;
 
+/// Options for download item creation.
 pub enum CreateOpts {
     Segmented { num_segments: u64, filesize: u64 },
     Normal,
 }
 
+/// Verification state of the downloaded file.
 pub enum VerificationState {
     Verifying,
     Verified,
     VerifyFailed,
 }
 
+/// Represents an individual download item being managed, containing multiple segments,
+/// status channels, and verification handlers.
 pub struct DownloadItem {
+    /// The individual file segments comprising this download.
     pub segments: Vec<InPlaceSegment>,
+    /// Watch receivers for tracking individual segment status updates.
     pub status_receivers: Vec<tokio::sync::watch::Receiver<DownloadStatus>>,
+    /// Local file path where the download is saved.
     pub filepath: PathBuf,
+    /// Source URL of the download.
     pub url: String,
+    /// Polling rate in milliseconds for progress updates.
     pub polling_rate_ms: u64,
+    /// Channel sender for issuing commands (pause, stop) to segments.
     pub segment_command_sender: watch::Sender<SegmentCommand>,
+    /// Optional hash verifier for integrity checks.
     pub verifier: VerifierMaybe,
+    /// Receiver for the final file verification result state.
     pub verify_result_receiver: watch::Receiver<VerificationState>,
+    /// Sender for the final file verification result state.
     pub verify_result_sender: watch::Sender<VerificationState>,
+    /// Retry scheme for download
+    pub retry_scheme: crate::retry_scheme::RetryScheme,
 }
 
 impl DownloadItem {
+    /// Creates a new `DownloadItem` from persistent `DownloadData`, pre-allocating the file if fresh.
     pub async fn create_from_data(
         client: reqwest::Client,
         mut download_data: DownloadData,
@@ -73,6 +89,7 @@ impl DownloadItem {
                 polling_rate_ms,
                 req_reciever,
                 download_data.state.clone(),
+                download_data.retry_scheme.clone(),
             )
             .await?;
             segments.push(segment);
@@ -90,9 +107,12 @@ impl DownloadItem {
             verifier: download_data.verifier.clone(),
             verify_result_receiver: receiver,
             verify_result_sender: sender,
+            retry_scheme: download_data.retry_scheme,
         });
         Ok(item)
     }
+
+    /// Starts all segments concurrently, manages pause/stop lifecycles, and triggers post-download verification.
     pub async fn start(&self) -> Result<(), DownloadRunError> {
         let mut futures = Vec::new();
         for segment in &self.segments {
@@ -125,7 +145,7 @@ impl DownloadItem {
         Ok(())
     }
 
-    /// Computes aggregated status across all active segment receivers (Instantaneous)
+    /// Computes aggregated status across all active segment receivers (Instantaneous).
     pub fn get_status(&self) -> DownloadStatus {
         let mut total_downloaded: u64 = 0;
         let mut total_speed: f64 = 0.0;
@@ -212,6 +232,7 @@ impl DownloadItem {
                 .collect(),
             state: self.get_status().state,
             verifier: self.verifier.clone(),
+            retry_scheme: self.retry_scheme.clone(),
         }
     }
 

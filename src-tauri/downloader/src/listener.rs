@@ -4,25 +4,35 @@ use thiserror::Error;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
+/// Errors related to the HTTP listener server startup.
 #[derive(Error, Debug)]
 pub enum ServerError {
     #[error("Failed to start the server!")]
     ServerStartError,
 }
 
-// Shared state that Axum handlers can safely clone and access across threads
+/// Shared state injected into Axum handlers, providing a thread-safe queue
+/// for incoming external download requests.
 #[derive(Clone)]
 pub struct ServerState {
-    // mpsc sender acts as your queue (replaces the watch channel)
+    /// MPSC sender acting as a bounded queue for `ExternalDownloadRequest` messages.
     pub tx: mpsc::Sender<ExternalDownloadRequest>,
 }
 
+/// HTTP server that listens for external download requests (e.g., from browser extensions)
+/// and forwards them to an internal channel for processing.
 pub struct Server {
     port: u16,
     state: ServerState,
 }
 
 impl Server {
+    /// Creates a new `Server` instance and returns a receiver for queued requests.
+    ///
+    /// # Arguments
+    /// * `port` - The TCP port to bind to (e.g., 8080).
+    ///
+    /// Returns a tuple of `(Server, mpsc::Receiver<ExternalDownloadRequest>)`.
     pub fn new(port: u16) -> (Self, mpsc::Receiver<ExternalDownloadRequest>) {
         // Buffer size of 100 pending extension requests
         let (tx, receiver) = mpsc::channel(100);
@@ -33,6 +43,8 @@ impl Server {
         (server, receiver)
     }
 
+    /// Starts the Axum HTTP server, listening on `127.0.0.1:port`.
+    /// Exposes a `/download` POST endpoint that accepts JSON `ExternalDownloadRequest` payloads.
     pub async fn start(self) -> Result<(), ServerError> {
         let app = Router::new()
             .route("/download", post(handle_download_request))
@@ -51,7 +63,8 @@ impl Server {
     }
 }
 
-// Standalone or associated handler function leveraging Axum's State extractor
+/// Axum handler for the `/download` endpoint.
+/// Receives JSON `ExternalDownloadRequest`, enqueues it via the channel, and responds.
 async fn handle_download_request(
     State(state): State<ServerState>,
     Json(request): Json<ExternalDownloadRequest>,

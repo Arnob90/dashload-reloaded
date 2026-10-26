@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Errors that can occur during session state serialization or deserialization.
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum DataSerializationError {
     #[error("Failed to open or close file: {0}")]
@@ -14,6 +15,7 @@ impl From<tokio::io::Error> for DataSerializationError {
         Self::IoError(value.to_string())
     }
 }
+
 impl From<serde_json::Error> for DataSerializationError {
     fn from(value: serde_json::Error) -> Self {
         Self::DeserializationError(value.to_string())

@@ -14,6 +14,7 @@ pub mod listener;
 pub mod message_pass;
 pub mod misc;
 pub mod request_headers;
+pub mod retry_scheme;
 pub mod segmented_verifier;
 pub mod serialization_error;
 pub mod serialize_io_error;

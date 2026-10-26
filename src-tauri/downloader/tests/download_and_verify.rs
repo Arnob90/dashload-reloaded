@@ -1,11 +1,12 @@
-use downloader::download_manager::DownloadManager;
-use downloader::download_status::DownloadState;
-use downloader::request_headers::RequestHeaders;
-use downloader::verifier::{HashAlgo, VerifierMaybe};
+use dashload_downloader::download_manager::DownloadManager;
+use dashload_downloader::download_status::DownloadState;
+use dashload_downloader::request_headers::RequestHeaders;
+use dashload_downloader::verifier::{HashAlgo, VerifierMaybe};
 use log::info;
 use std::time::Duration;
 
 #[test_log::test(tokio::test)]
+#[ignore = "Live Network Test"]
 async fn test_alpine_download_and_verify_sha256() {
     let download_url = "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/alpine-minirootfs-3.24.1-x86_64.tar.gz";
     let sha256_url = "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/alpine-minirootfs-3.24.1-x86_64.tar.gz.sha256";

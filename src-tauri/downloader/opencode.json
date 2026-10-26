@@ -1,0 +1,44 @@
+{
+	"$schema": "https://opencode.ai/config.json",
+	"agents": {
+		"planner": {
+			"description": "Analyzes backend Rust code and maps out TypeScript API signatures.",
+			"mode": "primary",
+			"model": "google/gemini-3.5-flash-lite",
+			"system": "You are a precise system architect. Use native glob, grep, and read tools (NOT bash) to analyze the backend Rust commands. Write your exact execution plan and API signatures directly into .opencode/plans/",
+			"permissions": [
+				{
+					"action": "edit",
+					"resource": "*",
+					"effect": "deny"
+				},
+				{
+					"action": "shell",
+					"resource": "*",
+					"effect": "deny"
+				},
+				{
+					"action": "read",
+					"resource": "*",
+					"effect": "allow"
+				},
+				{
+					"action": "edit",
+					"resource": "*.opencode/plans/**",
+					"effect": "allow"
+				},
+				{
+					"action": "edit",
+					"resource": "*.opencode/reviews/**",
+					"effect": "allow"
+				}
+			]
+		},
+		"builder": {
+			"description": "Implements the TypeScript bindings based on the structured plan.",
+			"mode": "primary",
+			"model": "openrouter/cohere/north-mini-code:free",
+			"system": "You are an implementation specialist. CRITICAL RULES:\n1. Read .opencode/plans/ carefully before making changes.\n2. STRICT SCOPE BOUNDARY: ONLY modify files explicitly listed in the execution plan.\n3. DO NOT refactor, rename, format, or 'improve' unrequested code, dependencies, or configuration files.\n4. DO NOT run build or package scripts unless specifically requested by the user.\n5. If a plan requires touching an unmentioned file, stop and request user approval."
+		}
+	}
+}

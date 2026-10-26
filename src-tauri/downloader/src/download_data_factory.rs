@@ -3,17 +3,21 @@ use crate::download_status::DownloadState;
 use crate::in_place_segment::{InPlaceSegmentData, SegmentInfo};
 use crate::misc::clamp;
 use crate::request_headers::RequestHeaders;
+use crate::retry_scheme::RetryScheme;
 use crate::serialization_error::DataSerializationError;
 use crate::verifier::VerifierMaybe;
+use reqwest::header::HeaderMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
+
 #[derive(Debug, PartialEq, Eq)]
 struct Interval {
     pub start: u64,
     pub end: u64,
 }
 
+/// Divides a file of given `size` into `num_segments` equal byte ranges.
 fn divide_into_segments(size: u64, num_segments: u64) -> Vec<Interval> {
     if size == 0 {
         panic!("Size must be greater than 0 to divide into segments.");
@@ -32,16 +36,29 @@ fn divide_into_segments(size: u64, num_segments: u64) -> Vec<Interval> {
     }
     intervals
 }
+
+/// Factory for constructing `DownloadData` instances for both segmented and normal downloads,
+/// plus deserialization from session files.
 pub struct DownloadDataFactory;
+
 impl DownloadDataFactory {
-    /// Creates DownloadData for a new segmented download
+    /// Creates `DownloadData` for a new segmented (multi-chunk) download.
+    ///
+    /// # Arguments
+    /// * `url` - The source download URL.
+    /// * `filepath` - Local destination file path.
+    /// * `filesize` - Total file size in bytes (required for segmentation).
+    /// * `num_segments` - Number of concurrent segments to split the file into.
+    /// * `verifier` - Optional checksum verifier for integrity.
+    /// * `request_headers` - HTTP headers for the download requests.
     pub fn new_segmented(
         url: String,
         filepath: PathBuf,
         filesize: u64,
         num_segments: u64,
         verifier: VerifierMaybe,
-        request_headers: RequestHeaders,
+        request_headers: HeaderMap,
+        retry_scheme: RetryScheme,
     ) -> DownloadData {
         let segments = divide_into_segments(filesize, num_segments)
             .iter()
@@ -53,7 +70,7 @@ impl DownloadDataFactory {
                     end: i.end,
                 }),
                 last_downloaded: 0,
-                headers: request_headers.clone(),
+                headers: RequestHeaders::from_header_map(&request_headers),
             })
             .collect();
         DownloadData {
@@ -65,15 +82,17 @@ impl DownloadDataFactory {
                 download_speed: 0.0,
             },
             verifier,
+            retry_scheme,
         }
     }
 
-    /// Creates DownloadData for a normal (single-stream / unknown size) download
+    /// Creates `DownloadData` for a normal (single-stream / unknown size) download.
     pub fn new_normal(
         url: String,
         filepath: PathBuf,
         verifier: VerifierMaybe,
         request_headers: RequestHeaders,
+        retry_scheme: RetryScheme,
     ) -> DownloadData {
         DownloadData {
             url: url.clone(),
@@ -90,8 +109,11 @@ impl DownloadDataFactory {
                 download_speed: 0.0,
             },
             verifier,
+            retry_scheme,
         }
     }
+
+    /// Deserializes a session file (JSON) into a map of download IDs to `DownloadData`.
     pub async fn deserialize_datas(
         json_path: &Path,
     ) -> Result<HashMap<String, DownloadData>, DataSerializationError> {
@@ -108,7 +130,7 @@ mod tests {
     // 1. FAILS: Division by zero when size is 0.
     // num_segments.max(1).min(0) evaluates to 0, causing `0 / 0` to panic.
     #[test]
-    #[should_panic(expected = "attempt to divide by zero")]
+    #[should_panic(expected = "Size must be greater than 0 to divide into segments")]
     fn test_zero_size_causes_division_by_zero() {
         let _ = divide_into_segments(0, 5);
     }

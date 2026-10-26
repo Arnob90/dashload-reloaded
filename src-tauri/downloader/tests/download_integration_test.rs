@@ -1,12 +1,12 @@
-use downloader::download_manager::DownloadManager;
-use downloader::download_status::DownloadState;
-use downloader::request_headers::RequestHeaders;
-use downloader::verifier::{HashAlgo, VerifierMaybe};
+use dashload_downloader::download_manager::DownloadManager;
+use dashload_downloader::download_status::DownloadState;
+use dashload_downloader::request_headers::RequestHeaders;
+use dashload_downloader::verifier::{HashAlgo, VerifierMaybe};
 use std::path::PathBuf;
 use std::time::Duration;
 
 #[test_log::test(tokio::test)]
-#[ignore = "Heavy 3GB download, run locally with --ignored"]
+#[ignore = "Live Network Test"]
 async fn test_download() {
     let update_rate_ms: u64 = 400;
     let client = reqwest::Client::new();

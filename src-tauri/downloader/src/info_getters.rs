@@ -1,8 +1,8 @@
+use reqwest::header::HeaderMap;
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::request_headers::RequestHeaders;
-
+/// Errors that can occur when extracting a filename from a remote URL.
 #[derive(Error, Debug, Serialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum FilepathGettingError {
@@ -17,12 +17,16 @@ pub enum FilepathGettingError {
     #[error("Given url is invalid. Url: {0}")]
     InvalidUrl(String),
 }
+
 impl From<reqwest::Error> for FilepathGettingError {
     fn from(e: reqwest::Error) -> Self {
         FilepathGettingError::RequestError(e.to_string())
     }
 }
 
+/// Attempts to determine a suitable filename from the remote URL.
+/// Tries `HEAD` first, falls back to `GET`, and parses `Content-Disposition` header.
+/// Falls back to the last path segment of the URL if no header is present.
 pub async fn get_filename_from_url(
     client: reqwest::Client,
     url: &str,
@@ -60,16 +64,14 @@ pub async fn get_filename_from_url(
     Err(FilepathGettingError::Filenameless)
 }
 
+/// Fetches the `Content-Length` header via `HEAD` request to determine file size.
+/// Returns `None` if the request fails or the header is missing/malformed.
 pub async fn get_filesize(
     client: reqwest::Client,
     url: &str,
-    headers: &RequestHeaders,
+    header_map: HeaderMap,
 ) -> Option<u64> {
-    let mut req = client.head(url);
-    let header_map_result = headers.to_header_map();
-    if let Ok(header_map) = header_map_result {
-        req = req.headers(header_map);
-    }
+    let req = client.head(url).headers(header_map);
     req.send()
         .await
         .ok()?

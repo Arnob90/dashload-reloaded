@@ -1,8 +1,11 @@
+use reqwest::header::{CONTENT_LENGTH, CONTENT_RANGE, HeaderValue, RANGE};
 use reqwest::{self, header::HeaderMap};
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::length_getter;
+
+/// Errors that can occur during pre-flight verification of segmented download support.
 #[derive(Error, Debug, Serialize, Clone)]
 #[serde(tag = "kind", content = "payload")]
 pub enum SegmentVerificationError {
@@ -17,62 +20,121 @@ pub enum SegmentVerificationError {
     #[error("The server does not support range requests")]
     ServerNotRangable,
     #[error("Invalid header value")]
-    InvalidHeaderValue, // New variant for the parse error
+    InvalidHeaderValue,
     #[error("Server error. Error code: {0}")]
     ServerFailure(u16),
     #[error("Cannot find metadata for resumption")]
     NoMetadataFile,
     #[error("The given download is not segmented")]
     NoSegments,
+    #[error("The server does not have filesize information")]
+    NoFilesize,
 }
+
 impl From<reqwest::Error> for SegmentVerificationError {
     fn from(err: reqwest::Error) -> Self {
         SegmentVerificationError::RequestError(err.to_string())
     }
 }
 
+/// Verifies that a remote server supports segmented (range-based) downloads.
+///
+/// Checks that:
+/// 1. The requested segment bounds are valid.
+/// 2. A GET request with `Range: bytes=0-0` returns 206 Partial Content.
+/// 3. Content-Range describes exactly byte 0 and reports the total file size.
+/// 4. The probe response contains exactly one byte.
+///
+/// `Accept-Ranges` is deliberately not required because it is only advisory.
 pub async fn verify_segmented(
     client: reqwest::Client,
     url: &str,
     _begin: u64,
     end: u64,
+    headers: HeaderMap,
 ) -> Result<(), SegmentVerificationError> {
-    // --- Metadata Check with HEAD ---
-    let response = client.head(url).send().await?;
+    // --- Probe actual range support ---
+    // Preserve the caller's headers and override any existing Range header.
+    let mut probe_headers = headers;
+    probe_headers.insert(RANGE, HeaderValue::from_static("bytes=0-0"));
 
-    if !response.status().is_success() {
-        return Err(SegmentVerificationError::ServerFailure(
-            response.status().as_u16(),
-        ));
-    }
+    let mut response = client.get(url).headers(probe_headers).send().await?;
 
-    if let Some(header_value) = response.headers().get("Accept-Ranges") {
-        if header_value.to_str().map_or(true, |s| s != "bytes") {
-            return Err(SegmentVerificationError::ServerNotRangable);
-        }
-    } else {
+    let status = response.status();
+
+    if status.as_u16() == 200 {
+        // The server ignored our Range request and returned the full resource.
         return Err(SegmentVerificationError::ServerNotRangable);
     }
-    let client_to_get_length = client.clone();
-    let length_num: u64 = length_getter::get_length(client_to_get_length, url).await?;
-    if end >= length_num {
+
+    if status.as_u16() != 206 {
+        return Err(SegmentVerificationError::ServerFailure(status.as_u16()));
+    }
+
+    // --- Validate Content-Range ---
+    let content_range = response
+        .headers()
+        .get(CONTENT_RANGE)
+        .and_then(|value| value.to_str().ok())
+        .ok_or(SegmentVerificationError::ServerNotRangable)?;
+
+    // Expected format: "bytes 0-0/TOTAL"
+    let (range_part, total_part) = content_range
+        .strip_prefix("bytes ")
+        .and_then(|value| value.split_once('/'))
+        .ok_or(SegmentVerificationError::ServerNotRangable)?;
+
+    let (start_part, end_part) = range_part
+        .split_once('-')
+        .ok_or(SegmentVerificationError::ServerNotRangable)?;
+
+    let start = start_part
+        .parse::<u64>()
+        .map_err(|_| SegmentVerificationError::ServerNotRangable)?;
+
+    let returned_end = end_part
+        .parse::<u64>()
+        .map_err(|_| SegmentVerificationError::ServerNotRangable)?;
+
+    let total_size = total_part
+        .parse::<u64>()
+        .map_err(|_| SegmentVerificationError::ServerNotRangable)?;
+
+    if start != 0 || returned_end != 0 || total_size == 0 {
+        return Err(SegmentVerificationError::ServerNotRangable);
+    }
+    // Validate the requested segment against the confirmed file size.
+    if end >= total_size {
         return Err(SegmentVerificationError::RangeError);
     }
 
-    // --- Prepare and return the GET request Future ---
-    let mut headers = HeaderMap::new();
-    //Stream 0 bytes as test
-    let range_header = format!("bytes={}-{}", 0, 0)
-        .parse()
-        .map_err(|_| SegmentVerificationError::InvalidHeaderValue)?;
-    headers.insert("Range", range_header);
+    // Validate Content-Length when provided.
+    if let Some(value) = response.headers().get(CONTENT_LENGTH) {
+        let length = value
+            .to_str()
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or(SegmentVerificationError::ServerNotRangable)?;
 
-    let download_future = client.get(url).headers(headers).send().await?;
-    let status_code = download_future.status().as_u16();
-    if status_code == 206 {
-        return Ok(());
-    } else if status_code == 200 {
+        if length != 1 {
+            return Err(SegmentVerificationError::ServerNotRangable);
+        }
+    }
+
+    // Validate the actual body without buffering the entire response.
+    let mut received = 0usize;
+
+    while let Some(chunk) = response.chunk().await? {
+        received += chunk.len();
+
+        if received > 1 {
+            return Err(SegmentVerificationError::ServerNotRangable);
+        }
+    }
+
+    if received != 1 {
         return Err(SegmentVerificationError::ServerNotRangable);
     }
-    Err(SegmentVerificationError::ServerFailure(status_code))
+
+    Ok(())
 }
