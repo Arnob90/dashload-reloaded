@@ -29,6 +29,7 @@ async fn test_segmented_download_completes() {
             TEST_SEGMENTS,
             VerifierMaybe::none(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -63,6 +64,7 @@ async fn test_segmented_download_with_verifier() {
             TEST_SEGMENTS,
             create_sha256_verifier(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -93,6 +95,7 @@ async fn test_segmented_download_verification_fails() {
             TEST_SEGMENTS,
             create_wrong_verifier(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -122,6 +125,7 @@ async fn test_segmented_download_sha512_verifier() {
             TEST_SEGMENTS,
             verifier,
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -150,6 +154,7 @@ async fn test_segmented_download_md5_verifier() {
             TEST_SEGMENTS,
             verifier,
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");

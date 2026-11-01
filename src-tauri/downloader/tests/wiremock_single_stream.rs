@@ -31,6 +31,7 @@ async fn test_single_stream_download_completes() {
             TEST_SEGMENTS,
             VerifierMaybe::none(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await;
     let id_err = id.expect_err("Expected error due to unsupported segmented download");
@@ -59,6 +60,7 @@ async fn test_single_stream_with_verifier() {
             1, // Explicitly request 1 segment
             create_sha256_verifier(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -95,6 +97,7 @@ async fn test_single_stream_sha512_verifier() {
             1,
             verifier,
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -123,6 +126,7 @@ async fn test_single_stream_verification_fails() {
             1,
             create_wrong_verifier(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");

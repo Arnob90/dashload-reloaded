@@ -2,16 +2,16 @@
 
 use dashload_downloader::{
     download_manager::DownloadManager,
-    download_run_error::DownloadRunError,
     download_status::{DownloadState, DownloadStatus},
     request_headers::RequestHeaders,
+    retry_scheme::{ExponentialBackoff, RetryScheme},
     verifier::{HashAlgo, VerifierMaybe},
 };
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::fs;
 use wiremock::matchers::{header, method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 /// Standard test file size: 1 MB
 pub const TEST_FILE_SIZE: u64 = 1_000_000;
@@ -44,6 +44,29 @@ pub const TEST_FILE_MD5: &str = "c9bd641122080114548d4af2a41a7e11";
 pub fn temp_filepath(prefix: &str) -> PathBuf {
     let filename = format!("{}_{}.bin", prefix, uuid::Uuid::new_v4().as_simple());
     std::env::temp_dir().join(filename)
+}
+
+/// Retry scheme for tests that expect a successful transfer.
+pub fn default_retry_scheme() -> RetryScheme {
+    RetryScheme::default()
+}
+
+/// Retry scheme with retries disabled.
+///
+/// Failure-path tests assert on the *terminal* error produced by a single
+/// attempt. The public API now retries transient failures by default, so these
+/// tests opt out to keep their original single-attempt semantics and bounded
+/// run time.
+pub fn no_retry_scheme() -> RetryScheme {
+    RetryScheme {
+        max_attempts: 0,
+        backoff: ExponentialBackoff::new(
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+            1.0,
+            false,
+        ),
+    }
 }
 
 /// Default test headers (Tor Browser / Firefox ESR User-Agent)
@@ -175,6 +198,20 @@ pub async fn setup_dynamic_range_mock_server() -> MockServer {
         .mount(&mock_server)
         .await;
 
+    // Range-support probe issued by `DownloadManager::add_download` before
+    // segmenting (always requests the single byte at offset 0).
+    Mock::given(method("GET"))
+        .and(path("/test-file.bin"))
+        .and(header("Range", "bytes=0-0"))
+        .respond_with(
+            ResponseTemplate::new(206)
+                .insert_header("Content-Range", format!("bytes 0-0/{}", TEST_FILE_SIZE))
+                .insert_header("Content-Length", "1")
+                .set_body_bytes(&content[0..=0]),
+        )
+        .mount(&mock_server)
+        .await;
+
     // Range requests for each segment
     for segment_idx in 0..TEST_SEGMENTS {
         let start = segment_idx * SEGMENT_SIZE;
@@ -183,15 +220,21 @@ pub async fn setup_dynamic_range_mock_server() -> MockServer {
         let content_range = format!("bytes {}-{}/{}", start, end, TEST_FILE_SIZE);
         let body = &content[start as usize..=end as usize];
 
+        // Keep the final segment in flight long enough for session tests to
+        // pause a genuinely in-progress download while earlier segments have
+        // already recorded progress.
+        let mut response = ResponseTemplate::new(206)
+            .insert_header("Content-Range", content_range)
+            .insert_header("Content-Length", SEGMENT_SIZE.to_string())
+            .set_body_bytes(body);
+        if segment_idx == TEST_SEGMENTS - 1 {
+            response = response.set_delay(Duration::from_secs(2));
+        }
+
         Mock::given(method("GET"))
             .and(path("/test-file.bin"))
             .and(header("Range", range_header.as_str()))
-            .respond_with(
-                ResponseTemplate::new(206)
-                    .insert_header("Content-Range", content_range)
-                    .insert_header("Content-Length", SEGMENT_SIZE.to_string())
-                    .set_body_bytes(body),
-            )
+            .respond_with(response)
             .mount(&mock_server)
             .await;
     }
@@ -237,6 +280,87 @@ pub async fn poll_until_completed(
 
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+pub struct DynamicRangeResponder {
+    pub content: Vec<u8>,
+    pub delay: Duration,
+}
+
+impl Respond for DynamicRangeResponder {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        let total_size = self.content.len();
+
+        // 1. Handle HEAD requests
+        if request.method.as_str() == "HEAD" {
+            return ResponseTemplate::new(200)
+                .insert_header("Content-Length", total_size.to_string())
+                .insert_header("Accept-Ranges", "bytes");
+        }
+
+        // 2. Handle GET with Range header
+        if let Some(range_header) = request.headers.get("range").and_then(|v| v.to_str().ok())
+            && let Some(range_spec) = range_header.strip_prefix("bytes=")
+        {
+            let parts: Vec<&str> = range_spec.split('-').collect();
+            let start: usize = parts[0].parse().unwrap_or(0);
+            let end: usize = if parts.len() > 1 && !parts[1].is_empty() {
+                parts[1].parse().unwrap_or(total_size - 1)
+            } else {
+                total_size - 1
+            };
+
+            let end = end.min(total_size - 1);
+            let slice = &self.content[start..=end];
+            let delay = if range_spec == "0-0" {
+                Duration::ZERO // No delay for the probe
+            } else {
+                self.delay // Apply configured delay for other ranges
+            };
+
+            return ResponseTemplate::new(206)
+                .insert_header(
+                    "Content-Range",
+                    format!("bytes {}-{}/{}", start, end, total_size),
+                )
+                .insert_header("Content-Length", slice.len().to_string())
+                .set_body_bytes(slice.to_vec())
+                .set_delay(delay);
+        }
+
+        // 3. Handle standard GET without Range (returns full content)
+        ResponseTemplate::new(200)
+            .insert_header("Content-Length", total_size.to_string())
+            .insert_header("Accept-Ranges", "bytes")
+            .set_body_bytes(self.content.clone())
+            .set_delay(self.delay)
+    }
+}
+
+/// Creates a universal mock server serving dummy data of any size
+pub async fn start_universal_mock_server(size_bytes: usize, delay: Duration) -> MockServer {
+    let mock_server = MockServer::start().await;
+    let dummy_content = vec![0x42; size_bytes]; // Fill with dummy byte (e.g. 0x42)
+
+    Mock::given(method("HEAD"))
+        .and(path("/test-file.bin"))
+        .respond_with(DynamicRangeResponder {
+            content: dummy_content.clone(),
+            delay: Duration::ZERO,
+        })
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/test-file.bin"))
+        .respond_with(DynamicRangeResponder {
+            content: dummy_content,
+            delay,
+        })
+        .mount(&mock_server)
+        .await;
+
+    mock_server
 }
 
 /// Cleans up a test file

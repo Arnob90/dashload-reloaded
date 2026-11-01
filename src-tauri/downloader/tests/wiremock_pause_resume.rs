@@ -120,6 +120,7 @@ async fn test_pause_resume_single_cycle() {
             1,
             VerifierMaybe::none(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -181,6 +182,7 @@ async fn test_pause_resume_multiple_cycles() {
             1,
             VerifierMaybe::none(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -247,6 +249,7 @@ async fn test_stop_deletes_file() {
             1,
             VerifierMaybe::none(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -296,6 +299,7 @@ async fn test_reconstruct_resume() {
             1,
             VerifierMaybe::none(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");

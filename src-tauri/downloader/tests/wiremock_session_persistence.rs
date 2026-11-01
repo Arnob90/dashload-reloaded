@@ -32,6 +32,7 @@ async fn test_save_session_creates_valid_json() {
             TEST_SEGMENTS,
             VerifierMaybe::none(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -96,6 +97,7 @@ async fn test_reconstruct_resumes_from_snapshot() {
             TEST_SEGMENTS,
             VerifierMaybe::none(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -191,6 +193,7 @@ async fn test_save_session_preserves_verifier() {
             TEST_SEGMENTS,
             verifier,
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -246,6 +249,7 @@ async fn test_save_session_preserves_headers() {
             TEST_SEGMENTS,
             VerifierMaybe::none(),
             custom_headers.clone(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -297,6 +301,7 @@ async fn test_reconstruct_multiple_downloads() {
             TEST_SEGMENTS,
             VerifierMaybe::none(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download 1");
@@ -308,6 +313,7 @@ async fn test_reconstruct_multiple_downloads() {
             TEST_SEGMENTS,
             VerifierMaybe::none(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download 2");
@@ -362,7 +368,7 @@ async fn test_reconstruct_multiple_downloads() {
 /// Test: Round-trip with DownloadDataFactory deserialize_datas
 #[tokio::test]
 async fn test_deserialize_datas_roundtrip() {
-    let mock_server = setup_segmented_mock_server().await;
+    let mock_server = setup_dynamic_range_mock_server().await;
     let client = reqwest::Client::new();
     let manager = DownloadManager::new(client, 100);
     let path = temp_filepath("wiremock_deserialize");
@@ -374,6 +380,7 @@ async fn test_deserialize_datas_roundtrip() {
             TEST_SEGMENTS,
             create_sha256_verifier(),
             default_test_headers(),
+            default_retry_scheme(),
         )
         .await
         .expect("Failed to add download");

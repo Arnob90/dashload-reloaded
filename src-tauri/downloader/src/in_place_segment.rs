@@ -178,15 +178,16 @@ impl InPlaceSegment {
     /// Public entry point: starts the segment download loop.
     /// Automatically catches any error and emits `DownloadState::Failed` to the status channel.
     pub async fn start(&self) -> Result<(), DownloadRunError> {
+        eprintln!("Starting segment download for {}", self.data.url);
         let res = self.start_internal().await;
-
         // If start_internal returned an Err, emit the failure status to self.sender
         if let Err(ref err) = res {
-            let _ = self.sender.send(DownloadStatus {
-                total: self.sender.borrow().total,
-                downloaded: self.sender.borrow().downloaded,
-                state: DownloadState::Failed(err.clone()),
+            eprintln!("Segment download failed: {:?}", err);
+            self.sender.send_modify(|status| {
+                status.state = DownloadState::Failed(err.clone());
             });
+            eprintln!("Sent failure status to channel");
+            eprintln!("Current status: {:?}", self.sender.borrow());
         }
 
         res
@@ -198,6 +199,7 @@ impl InPlaceSegment {
         res: &mut reqwest::Response,
         file: &mut tokio::fs::File,
         downloaded: &mut u64,
+        attempts: &mut u32,
         total_size: Option<u64>,
         chunk_wait_timeout: Duration,
     ) -> Result<StreamChunkResult, DownloadRunError> {
@@ -212,7 +214,18 @@ impl InPlaceSegment {
 
             let next_chunk_maybe = match next_chunk_or_timeout {
                 // Read succeeded
-                Ok(Ok(NextChunkMaybe::Chunk(chunk))) => chunk,
+                Ok(Ok(NextChunkMaybe::Chunk(chunk))) => {
+                    if let Some(ref chunk) = chunk
+                        && !chunk.is_empty()
+                    {
+                        *attempts = 0; // Reset attempts on successful read
+                    }
+                    eprintln!(
+                        "Read {} bytes from stream",
+                        chunk.as_ref().map_or(0, |c| c.len())
+                    );
+                    chunk
+                }
 
                 // User clicked Pause or Stop
                 Ok(Ok(NextChunkMaybe::Interrupted(cmd))) => {
@@ -341,13 +354,29 @@ impl InPlaceSegment {
         };
 
         loop {
+            eprintln!(
+                "Segment state: {:?}, downloaded: {}, attempts: {}",
+                state,
+                self.data.last_downloaded,
+                match state {
+                    DownloadingState::Connect { attempts, .. } => attempts,
+                    DownloadingState::Download { attempts, .. } => attempts,
+                    DownloadingState::Retry { attempts, .. } => attempts,
+                    DownloadingState::Finish { .. } => 0,
+                }
+            );
             state = match state {
                 DownloadingState::Connect {
                     downloaded,
                     attempts,
                 } => {
-                    self.handle_connect(&mut session, downloaded, attempts)
-                        .await?
+                    let err_maybe = self
+                        .handle_connect(&mut session, downloaded, attempts)
+                        .await;
+                    if err_maybe.is_err() {
+                        eprintln!("Error during connect: {:?}", err_maybe);
+                    }
+                    err_maybe?
                 }
                 DownloadingState::Download {
                     downloaded,
@@ -442,25 +471,47 @@ impl InPlaceSegment {
             }
             SegmentCommand::Nothing => {}
         }
-
-        let res = match self
-            .fetch_res_unless_interrupt(
+        // TODO: Make this configurable
+        let res_timed_out_maybe = tokio::time::timeout(
+            Duration::from_secs(10),
+            self.fetch_res_unless_interrupt(
                 req,
-                cmd_rx,
+                cmd_rx.clone(),
                 session.total_size,
                 downloaded,
                 &mut session.file,
-            )
-            .await
-        {
-            Ok(FetchResponseOutcome::Response(res)) => res,
+            ),
+        )
+        .await;
+        eprintln!(
+            "Fetch result has timed out: {:?}",
+            res_timed_out_maybe.is_err()
+        );
+        if res_timed_out_maybe.is_err() {
+            return Ok(DownloadingState::Retry {
+                downloaded,
+                attempts: attempts + 1,
+            });
+        }
+        let res_maybe = res_timed_out_maybe.unwrap();
+        let res = match res_maybe {
+            Ok(FetchResponseOutcome::Response(res)) => {
+                eprintln!("Fetch request succeeded with status: {:?}", res);
+                res
+            }
             Ok(FetchResponseOutcome::Paused | FetchResponseOutcome::Stopped) => {
+                eprintln!("Fetch request interrupted by command");
                 return Ok(DownloadingState::Finish {
                     downloaded,
                     completed: false,
                 });
             }
             Err(_e) if attempts < self.retry_scheme.max_attempts => {
+                eprintln!(
+                    "Fetch request failed, retrying (attempt {}/{})",
+                    attempts + 1,
+                    self.retry_scheme.max_attempts
+                );
                 return Ok(DownloadingState::Retry {
                     downloaded,
                     attempts: attempts + 1,
@@ -498,11 +549,12 @@ impl InPlaceSegment {
                 status
             )));
         }
+        eprintln!("It didn't stop?");
 
         session.response = Some(res);
         Ok(DownloadingState::Download {
             downloaded,
-            attempts: 0,
+            attempts,
         })
     }
 
@@ -512,11 +564,12 @@ impl InPlaceSegment {
         &self,
         session: &mut DownloadSession,
         downloaded: u64,
-        attempts: u32,
+        given_attempts: u32,
     ) -> Result<DownloadingState, DownloadRunError> {
         // The watch receiver only notifies on changes made after `changed()` is
         // armed, so a pause/stop that arrived between handshake and stream must
         // be caught by reading the live value here.
+        let mut attempts = given_attempts;
         let state = *self.command_reciever.borrow();
         match state {
             SegmentCommand::Pause => {
@@ -557,6 +610,7 @@ impl InPlaceSegment {
                 &mut res,
                 &mut session.file,
                 &mut current_downloaded,
+                &mut attempts,
                 session.total_size,
                 session.chunk_wait_timeout,
             )

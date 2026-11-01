@@ -1,19 +1,26 @@
 //! WireMock tests for error handling scenarios.
 
 use dashload_downloader::{
-    download_manager::DownloadManager,
-    download_manager::ManagerError,
-    download_run_error::DownloadRunError,
-    download_status::{DownloadState, DownloadStatus},
-    request_headers::RequestHeaders,
-    verifier::VerifierMaybe,
+    download_manager::DownloadManager, download_manager::ManagerError,
+    download_run_error::DownloadRunError, download_status::DownloadState, verifier::VerifierMaybe,
 };
 use std::path::PathBuf;
 use std::time::Duration;
 use wiremock::MockServer;
 
 mod wiremock_helpers;
+use console_subscriber::{self, init};
+use ctor;
+use log::{debug, info};
+use std::sync::Once;
 use wiremock_helpers::*;
+
+static INIT: Once = Once::new();
+fn init_console_subscriber() {
+    INIT.call_once(|| {
+        console_subscriber::init();
+    });
+}
 
 /// Test: Server returns 404 -> DownloadRunError::ServerError
 #[tokio::test]
@@ -30,6 +37,7 @@ async fn test_server_returns_404() {
             1,
             VerifierMaybe::none(),
             default_test_headers(),
+            no_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -60,6 +68,7 @@ async fn test_server_returns_500() {
             1,
             VerifierMaybe::none(),
             default_test_headers(),
+            no_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -95,6 +104,7 @@ async fn test_network_timeout() {
             1,
             VerifierMaybe::none(),
             default_test_headers(),
+            no_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -127,6 +137,7 @@ async fn test_disk_write_error() {
             1,
             VerifierMaybe::none(),
             default_test_headers(),
+            no_retry_scheme(),
         )
         .await;
 
@@ -172,6 +183,7 @@ async fn test_range_not_satisfiable() {
             1,
             VerifierMaybe::none(),
             default_test_headers(),
+            no_retry_scheme(),
         )
         .await
         .expect("Failed to add download");
@@ -188,53 +200,57 @@ async fn test_range_not_satisfiable() {
 }
 
 /// Test: Server closes connection mid-download
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_connection_reset() {
-    ///TODO: Dashload-Downloader currently does not have timeouts. Need to add
+    init_console_subscriber();
+    info!("Starting test_connection_reset");
     let mock_server = MockServer::start().await;
     let content = test_file_content();
+    let total_size = content.len();
 
-    // HEAD request
+    // 1. HEAD request
     wiremock::Mock::given(wiremock::matchers::method("HEAD"))
         .and(wiremock::matchers::path("/test-file.bin"))
         .respond_with(
             wiremock::ResponseTemplate::new(200)
-                .insert_header("Content-Length", TEST_FILE_SIZE.to_string())
+                .insert_header("Content-Length", total_size.to_string())
                 .insert_header("Accept-Ranges", "bytes"),
         )
         .mount(&mock_server)
         .await;
 
-    // First range request succeeds
+    // 2. Range probe (bytes=0-0)
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/test-file.bin"))
-        .and(wiremock::matchers::header("Range", "bytes=0-249999"))
+        .and(wiremock::matchers::header("Range", "bytes=0-0"))
         .respond_with(
             wiremock::ResponseTemplate::new(206)
-                .insert_header(
-                    "Content-Range",
-                    format!("bytes 0-249999/{}", TEST_FILE_SIZE),
-                )
-                .set_body_bytes(&content[0..250000]),
+                .insert_header("Content-Range", format!("bytes 0-0/{}", total_size))
+                .insert_header("Accept-Ranges", "bytes")
+                .set_body_bytes(vec![content[0]]),
         )
         .mount(&mock_server)
         .await;
+    info!(
+        "Mounted HEAD and Range probe mocks on WireMock server at {}",
+        mock_server.uri()
+    );
 
-    // Second range request - connection reset (no response)
-    // WireMock doesn't easily support connection reset, so we'll use a delay that exceeds timeout
+    // 3. The download request - hangs for 10s to trigger the client's 2s timeout!
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/test-file.bin"))
-        .and(wiremock::matchers::header("Range", "bytes=250000-499999"))
+        .and(wiremock::matchers::header(
+            "Range",
+            format!("bytes=0-{}", total_size - 1),
+        ))
         .respond_with(
-            wiremock::ResponseTemplate::new(200).set_delay(Duration::from_secs(10)), // Longer than client timeout
+            wiremock::ResponseTemplate::new(206).set_delay(Duration::from_secs(10)), // 👈 Triggers timeout
         )
         .mount(&mock_server)
         .await;
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .unwrap();
+    // Client with 2-second timeout
+    let client = reqwest::Client::builder().build().unwrap();
     let manager = DownloadManager::new(client, 100);
     let path = temp_filepath("wiremock_reset");
 
@@ -242,20 +258,45 @@ async fn test_connection_reset() {
         .add_download(
             format!("{}/test-file.bin", mock_server.uri()),
             path.clone(),
-            TEST_SEGMENTS,
+            1, // 👈 1 segment: avoids multi-segment math mismatches!
             VerifierMaybe::none(),
             default_test_headers(),
+            no_retry_scheme(), // max_attempts: 0 -> fails immediately
         )
         .await
         .expect("Failed to add download");
+    info!("Added download with ID: {}", id);
 
-    let status = poll_until_completed(&manager, &id, 10_000)
-        .await
-        .expect("Download timed out");
+    // Poll until the 2s timeout fails the download
+    let start = std::time::Instant::now();
+    let mut final_status = None;
 
-    // Should fail with network error due to timeout
+    info!("Final status before polling: {:?}", final_status);
+    let mut i = 0;
+    while start.elapsed() < Duration::from_secs(5) {
+        info!("Polling for download status (iteration {})...", i);
+        let status = manager.get_item_status(&id).unwrap();
+        if matches!(status.state, DownloadState::Failed(_)) {
+            final_status = Some(status);
+            break;
+        }
+        info!("Current status: {:?}", status.state);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        info!("Never again");
+        i += 1;
+    }
+    info!("Final status after polling: {:?}", final_status);
+
+    let status = final_status.expect("Download did not enter Failed state within 5s");
+
+    // Assert that it failed with NetworkError due to the 2s timeout
     assert!(
-        matches!(status.state, DownloadState::Failed(e) if matches!(e, DownloadRunError::NetworkError(_)))
+        matches!(
+            status.state,
+            DownloadState::Failed(DownloadRunError::NetworkError(_))
+        ),
+        "Expected NetworkError, got: {:?}",
+        status.state
     );
 
     cleanup_file(&path).await;

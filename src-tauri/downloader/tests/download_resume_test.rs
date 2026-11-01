@@ -1,6 +1,7 @@
 use dashload_downloader::download_manager::DownloadManager;
 use dashload_downloader::download_status::DownloadState;
 use dashload_downloader::request_headers::RequestHeaders;
+use dashload_downloader::retry_scheme::RetryScheme;
 use dashload_downloader::verifier::VerifierMaybe;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -41,6 +42,7 @@ async fn test_segmented_download_progress() {
             4,
             VerifierMaybe::none(),
             default_test_headers(), // 👈 5th argument added
+            RetryScheme::default(),
         )
         .await
         .unwrap();
@@ -81,6 +83,7 @@ async fn test_pause_and_resume_lifecycle() {
             4,
             VerifierMaybe::none(),
             default_test_headers(),
+            RetryScheme::default(),
         )
         .await
         .unwrap();
@@ -148,6 +151,7 @@ async fn test_single_stream_download() {
             1,
             VerifierMaybe::none(),
             default_test_headers(),
+            RetryScheme::default(),
         )
         .await
         .unwrap();

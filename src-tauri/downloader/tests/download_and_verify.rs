@@ -1,6 +1,7 @@
 use dashload_downloader::download_manager::DownloadManager;
 use dashload_downloader::download_status::DownloadState;
 use dashload_downloader::request_headers::RequestHeaders;
+use dashload_downloader::retry_scheme::RetryScheme;
 use dashload_downloader::verifier::{HashAlgo, VerifierMaybe};
 use log::info;
 use std::time::Duration;
@@ -61,6 +62,7 @@ async fn test_alpine_download_and_verify_sha256() {
             4,
             verifier,
             request_headers, // 👈 Passed request headers here
+            RetryScheme::default(),
         )
         .await
         .expect("Failed to add download");

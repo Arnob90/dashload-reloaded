@@ -11,6 +11,7 @@ use crate::segmented_verifier::verify_segmented;
 use crate::serialization_error::DataSerializationError;
 use crate::verifier::VerifierMaybe;
 use dashmap::DashMap;
+use log::info;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -172,6 +173,10 @@ impl DownloadManager {
         request_headers: RequestHeaders,
         retry_scheme: RetryScheme,
     ) -> Result<String, ManagerError> {
+        println!(
+            "Adding download: {} -> {:?} ({} segments)",
+            url, filepath, number_of_segments
+        );
         let data = self
             .get_download_data(
                 url,
@@ -193,8 +198,10 @@ impl DownloadManager {
         // 3. Spawn background runner task (.await added!)
         let item_clone = item.clone();
         tokio::spawn(async move {
+            eprintln!("Yes, I can read");
             let _ = item_clone.start().await;
         });
+        eprintln!("Download added with ID: {}", id);
 
         Ok(id)
     }
