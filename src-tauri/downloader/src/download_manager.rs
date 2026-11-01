@@ -81,7 +81,11 @@ impl DownloadManager {
         datas: HashMap<String, DownloadData>,
     ) -> Result<DownloadManager, ManagerError> {
         let manager = DownloadManager::new(client.clone(), poll_every_ms);
-        for (id, data) in datas {
+        for (id, mut data) in datas.into_iter() {
+            data.state = match data.state {
+                DownloadState::Retrying { .. } => DownloadState::Paused,
+                other => other,
+            };
             let item = DownloadItem::create_from_data(client.clone(), data, poll_every_ms)
                 .await
                 .map_err(|e| ManagerError::DownloadCreationError(e.to_string()))?;
@@ -157,6 +161,7 @@ impl DownloadManager {
     /// * `request_headers` - Custom HTTP headers (`RequestHeaders`) such as User-Agent or cookies.
     /// # Errors
     /// - ManagerError::SegmentedNotSupported if the server does not support segmented downloads.
+    ///
     /// Providing a fallback is user responsibility (e.g., retrying with a single segment).
     pub async fn add_download(
         &self,

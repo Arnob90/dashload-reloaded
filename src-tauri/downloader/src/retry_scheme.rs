@@ -2,10 +2,10 @@ use rand;
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExponentialBackoff {
-    base_delay: std::time::Duration,
-    max_delay: std::time::Duration,
-    factor: f64,
-    jitter: bool,
+    pub base_delay: std::time::Duration,
+    pub max_delay: std::time::Duration,
+    pub factor: f64,
+    pub jitter: bool,
 }
 impl ExponentialBackoff {
     pub fn new(
@@ -28,14 +28,14 @@ impl ExponentialBackoff {
             delay = self.max_delay;
         }
         if self.jitter {
-            let jitter_range = delay.as_millis() as u64 / 2.max(1);
-            let jitter = rand::random::<u64>() % jitter_range;
+            let jitter_range = (delay.as_millis() as u64 / 2).max(1);
+            let jitter = rand::random_range(0..jitter_range);
             delay += std::time::Duration::from_millis(jitter);
         }
         delay
     }
 }
-///Max attempt counts retries including initial attempt, so a max_attempts of 3 means 1 initial attempt + 2 retries = 3 total attempts.
+///Max attempt counts retries after the initial attempt, so a max_attempts of 3 means 1 initial attempt + 3 retries = 4 total attempts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryScheme {
     pub max_attempts: u32,

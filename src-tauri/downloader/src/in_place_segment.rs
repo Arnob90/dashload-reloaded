@@ -52,6 +52,13 @@ pub enum NextChunkMaybe {
     /// A data chunk was received (None indicates end of stream).
     Chunk(Option<Bytes>),
 }
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DownloadingState {
+    Connect,
+    Download,
+    Retry,
+    Finish,
+}
 
 /// Persistent data defining a single file segment for download or resume operations.
 /// Includes URL, file path, progress, segment boundaries, and request headers.
@@ -230,8 +237,107 @@ impl InPlaceSegment {
             }
         }
     }
+    async fn fetch_res_unless_interrupt(
+        &self,
+        req: reqwest::RequestBuilder,
+        command_reciever: watch::Receiver<SegmentCommand>,
+        total_size: Option<u64>,
+        downloaded: u64,
+        file: &mut tokio::fs::File,
+    ) -> Result<Option<reqwest::Response>, DownloadRunError> {
+        let mut cmd_rx = command_reciever.clone();
+        let res_result = tokio::select! {
+            http_res = req.send() => http_res,
+            _ = cmd_rx.changed() => {
+                let cmd = *cmd_rx.borrow();
+                match cmd {
+                    SegmentCommand::Pause => {
+                        let _ = self.sender.send(DownloadStatus {
+                            total: total_size,
+                            downloaded,
+                            state: DownloadState::Paused,
+                        });
+                        file.flush().await?;
+                        return Ok(None);
+                    }
+                    SegmentCommand::Stop => {
+                        let _ = self.sender.send(DownloadStatus {
+                            total: total_size,
+                            downloaded,
+                            state: DownloadState::Stopped,
+                        });
+                        return Ok(None);
+                    }
+                    SegmentCommand::Nothing => {
+                        panic!("Unexpected command received during fetch_res_unless_interrupt");
+                    }
+                }
+            }
+        };
+        res_result
+            .map(Some)
+            .map_err(|e| DownloadRunError::NetworkError(e.to_string()))
+    }
+    async fn connect(
+        &self,
+        file: &mut tokio::fs::File,
+        downloaded: u64,
+        total_size: Option<u64>,
+    ) -> DownloadingState {
+        let base_start = 0;
+        let _ = file
+            .seek(std::io::SeekFrom::Start(base_start + downloaded))
+            .await;
+        let range_header = get_range_header(&self.data);
+        let mut req = self.client.get(&self.data.url);
+        let headers = &[
+            ("Range", range_header.as_ref()),
+            ("Cookie", self.data.headers.cookies.as_ref()),
+            ("Referer", self.data.headers.referrer.as_ref()),
+            ("User-Agent", self.data.headers.user_agent.as_ref()),
+        ];
+        for (name, value) in headers {
+            if let Some(v) = value {
+                req = req.header(*name, *v);
+            }
+        }
+        let cmd_rx = self.command_reciever.clone();
+        let command = *cmd_rx.borrow();
+        match command {
+            SegmentCommand::Stop => {
+                let _ = self.sender.send(DownloadStatus {
+                    total: total_size,
+                    downloaded,
+                    state: DownloadState::Stopped,
+                });
+                return DownloadingState::Retry;
+            }
+            SegmentCommand::Pause => {
+                let _ = self.sender.send(DownloadStatus {
+                    total: total_size,
+                    downloaded,
+                    state: DownloadState::Paused,
+                });
+                return DownloadingState::Retry;
+            }
+            SegmentCommand::Nothing => {}
+        }
+        let res_maybe_err = self
+            .fetch_res_unless_interrupt(req, cmd_rx, total_size, downloaded, file)
+            .await;
+        if res_maybe_err.is_err() {
+            return DownloadingState::Retry;
+        }
+        let res_maybe = res_maybe_err.unwrap();
+        if res_maybe.is_none() {
+            return DownloadingState::Finish;
+        }
+        let res = res_maybe.unwrap();
+        todo!()
+    }
     /// Internal execution loop for downloading the segment chunks directly to disk.
     /// Handles range requests, resume logic, progress polling, and pause/stop commands.
+    /// In process of refactoring into a state machine
     async fn start_internal(&self) -> Result<(), DownloadRunError> {
         let status = self.sender.borrow().clone().state;
         if !matches!(status, DownloadState::Running { .. }) {
@@ -264,6 +370,7 @@ impl InPlaceSegment {
 
         let mut downloaded = self.data.last_downloaded;
         let mut attempts = 0;
+        //TODO: Make this configurable in the future, but for now, 10s is a reasonable default.
         let chunk_wait_timeout = Duration::from_secs(10);
 
         // OUTER RECONNECT / RETRY LOOP
@@ -297,9 +404,9 @@ impl InPlaceSegment {
             }
 
             let mut cmd_rx = self.command_reciever.clone();
-
+            let command = *cmd_rx.borrow();
             // Check for command before handshake
-            match *cmd_rx.borrow() {
+            match command {
                 SegmentCommand::Stop => {
                     let _ = self.sender.send(DownloadStatus {
                         total: total_size,
@@ -354,19 +461,13 @@ impl InPlaceSegment {
 
             // If initial handshake fails, retry with backoff
             let mut res = match res_result {
-                Ok(r) => r,
+                Ok(r) => {
+                    attempts = 0;
+                    r
+                }
                 Err(_e) if attempts < self.retry_scheme.max_attempts => {
                     attempts += 1;
-                    let delay = self.retry_scheme.backoff.next_delay(attempts);
-                    let _ = self.sender.send(DownloadStatus {
-                        total: total_size,
-                        downloaded,
-                        state: DownloadState::Retrying {
-                            attempt: attempts,
-                            max_attempts: self.retry_scheme.max_attempts,
-                            wait_secs: delay.as_secs(),
-                        },
-                    });
+                    let delay = self.retry_internal(attempts, total_size, downloaded).await;
                     tokio::time::sleep(delay).await;
                     continue; // Reconnect!
                 }
@@ -414,18 +515,11 @@ impl InPlaceSegment {
                     return Ok(());
                 }
                 // On chunk read timeout or socket drop, retry with backoff
-                Err(_e) if attempts < self.retry_scheme.max_attempts => {
+                Err(DownloadRunError::NetworkError(_) | DownloadRunError::TimeoutError)
+                    if attempts < self.retry_scheme.max_attempts =>
+                {
                     attempts += 1;
-                    let delay = self.retry_scheme.backoff.next_delay(attempts);
-                    let _ = self.sender.send(DownloadStatus {
-                        total: total_size,
-                        downloaded,
-                        state: DownloadState::Retrying {
-                            attempt: attempts,
-                            max_attempts: self.retry_scheme.max_attempts,
-                            wait_secs: delay.as_secs(),
-                        },
-                    });
+                    let delay = self.retry_internal(attempts, total_size, downloaded).await;
                     file.flush().await?;
                     tokio::time::sleep(delay).await;
                     continue; // Reconnects from the updated `downloaded` offset!
@@ -450,6 +544,25 @@ impl InPlaceSegment {
         let mut snapshot = self.data.clone();
         snapshot.last_downloaded = self.sender.borrow().downloaded;
         snapshot
+    }
+    ///Note to user: YOU MUST FLUSH, SLEEP AND CONTINUE after calling this function, as it does not handle those steps itself.
+    async fn retry_internal(
+        &self,
+        attempts: u32,
+        total_size: Option<u64>,
+        downloaded: u64,
+    ) -> Duration {
+        let delay = self.retry_scheme.backoff.next_delay(attempts - 1);
+        let _ = self.sender.send(DownloadStatus {
+            total: total_size,
+            downloaded,
+            state: DownloadState::Retrying {
+                attempt: attempts,
+                max_attempts: self.retry_scheme.max_attempts,
+                wait_secs: delay.as_secs(),
+            },
+        });
+        delay
     }
 }
 

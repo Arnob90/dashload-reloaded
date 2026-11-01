@@ -151,9 +151,12 @@ impl DownloadItem {
         let mut total_speed: f64 = 0.0;
         let mut total_filesize: Option<u64> = Some(0);
         let mut all_completed = true;
+        let mut all_retrying = true;
         let mut any_failed = None;
         let mut any_paused = false;
         let mut any_stopped = false;
+        let mut total_retry_attempts_across_segments: u32 = 0;
+        let mut longest_wait_secs_before_retry: u64 = 0;
 
         for rx in &self.status_receivers {
             let status = rx.borrow();
@@ -169,21 +172,38 @@ impl DownloadItem {
                 DownloadState::Running { download_speed } => {
                     total_speed += download_speed;
                     all_completed = false;
+                    all_retrying = false;
                 }
-                DownloadState::Completed { .. } => {}
+                DownloadState::Completed { .. } => {
+                    all_retrying = false;
+                }
                 DownloadState::Failed(err) => {
                     any_failed = Some(err.clone());
                     all_completed = false;
+                    all_retrying = false;
                 }
                 DownloadState::Paused => {
                     any_paused = true;
                     all_completed = false;
+                    all_retrying = false;
                 }
                 DownloadState::Stopped => {
                     all_completed = false;
-                    any_stopped = true
+                    any_stopped = true;
+                    all_retrying = false;
                 }
-                DownloadState::Verifying => {}
+                DownloadState::Verifying => {
+                    all_retrying = false;
+                }
+                DownloadState::Retrying {
+                    attempt,
+                    max_attempts: _,
+                    wait_secs,
+                } => {
+                    all_completed = false;
+                    total_retry_attempts_across_segments += *attempt;
+                    longest_wait_secs_before_retry = longest_wait_secs_before_retry.max(*wait_secs);
+                }
             }
         }
 
@@ -197,6 +217,12 @@ impl DownloadItem {
             DownloadState::Paused
         } else if any_stopped {
             DownloadState::Stopped
+        } else if all_retrying {
+            DownloadState::Retrying {
+                attempt: total_retry_attempts_across_segments,
+                max_attempts: self.retry_scheme.max_attempts,
+                wait_secs: longest_wait_secs_before_retry,
+            }
         } else {
             DownloadState::Running {
                 download_speed: total_speed,
