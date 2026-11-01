@@ -533,7 +533,10 @@ impl InPlaceSegment {
                     attempts: attempts + 1,
                 });
             }
-            return Err(DownloadRunError::NetworkError(format!(
+            // All retries exhausted on an HTTP error status: report it as a
+            // server error (it *was* an HTTP error response), distinct from a
+            // transport-level failure.
+            return Err(DownloadRunError::ServerError(format!(
                 "Server returned HTTP {}",
                 status
             )));
@@ -544,7 +547,7 @@ impl InPlaceSegment {
                 "Server does not support range requests".to_owned(),
             ));
         } else if !status.is_success() {
-            return Err(DownloadRunError::NetworkError(format!(
+            return Err(DownloadRunError::ServerError(format!(
                 "Server returned HTTP {}",
                 status
             )));

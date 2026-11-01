@@ -9,9 +9,8 @@ use std::time::Duration;
 use wiremock::MockServer;
 
 mod wiremock_helpers;
-use console_subscriber::{self, init};
-use ctor;
-use log::{debug, info};
+use console_subscriber;
+use log::info;
 use std::sync::Once;
 use wiremock_helpers::*;
 
@@ -85,21 +84,24 @@ async fn test_server_returns_500() {
 }
 
 /// Test: Network timeout -> DownloadRunError::NetworkError
+///
+/// A real transport-level failure (connecting to a closed port) is used rather
+/// than an unmounted WireMock route: an unmounted route answers HTTP 404
+/// quickly, which is correctly reported as `ServerError`, not `NetworkError`.
 #[tokio::test]
 async fn test_network_timeout() {
-    let mock_server = MockServer::start().await;
-    // Don't mount any handlers - connection will hang and eventually timeout
-
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(500))
+        .connect_timeout(Duration::from_millis(100))
+        .timeout(Duration::from_millis(200))
         .build()
         .unwrap();
     let manager = DownloadManager::new(client, 100);
     let path = temp_filepath("wiremock_timeout");
 
+    // Port 1 is not listening on localhost -> connect refusal -> NetworkError.
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
+            "http://127.0.0.1:1/test-file.bin".to_string(),
             path.clone(),
             1,
             VerifierMaybe::none(),
@@ -119,6 +121,7 @@ async fn test_network_timeout() {
 
     cleanup_file(&path).await;
 }
+
 /// Test: Disk write error -> DownloadRunError::DiskError
 #[tokio::test]
 async fn test_disk_write_error() {
@@ -151,7 +154,6 @@ async fn test_disk_write_error() {
 #[tokio::test]
 async fn test_range_not_satisfiable() {
     let mock_server = MockServer::start().await;
-    let content = test_file_content();
 
     // HEAD request
     wiremock::Mock::given(wiremock::matchers::method("HEAD"))
@@ -199,8 +201,8 @@ async fn test_range_not_satisfiable() {
     cleanup_file(&path).await;
 }
 
-/// Test: Server closes connection mid-download
-#[test_log::test(tokio::test)]
+/// Test: Server closes connection mid-download -> DownloadRunError::NetworkError
+#[tokio::test]
 async fn test_connection_reset() {
     init_console_subscriber();
     info!("Starting test_connection_reset");
@@ -219,7 +221,7 @@ async fn test_connection_reset() {
         .mount(&mock_server)
         .await;
 
-    // 2. Range probe (bytes=0-0)
+    // 2. Range probe (bytes=0-0) required by DownloadManager::add_download
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/test-file.bin"))
         .and(wiremock::matchers::header("Range", "bytes=0-0"))
@@ -231,26 +233,24 @@ async fn test_connection_reset() {
         )
         .mount(&mock_server)
         .await;
-    info!(
-        "Mounted HEAD and Range probe mocks on WireMock server at {}",
-        mock_server.uri()
-    );
 
-    // 3. The download request - hangs for 10s to trigger the client's 2s timeout!
+    // 3. The download request hangs for 10s, exceeding the client's 2s timeout,
+    // producing a transport-level timeout -> NetworkError.
+    // A fresh single-stream download sends no `Range` header, so this mock must
+    // match a GET without a Range matcher.
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/test-file.bin"))
-        .and(wiremock::matchers::header(
-            "Range",
-            format!("bytes=0-{}", total_size - 1),
-        ))
         .respond_with(
-            wiremock::ResponseTemplate::new(206).set_delay(Duration::from_secs(10)), // 👈 Triggers timeout
+            wiremock::ResponseTemplate::new(206).set_delay(Duration::from_secs(10)),
         )
         .mount(&mock_server)
         .await;
 
-    // Client with 2-second timeout
-    let client = reqwest::Client::builder().build().unwrap();
+    // Client with 2-second timeout so the 10s delay becomes a NetworkError.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
     let manager = DownloadManager::new(client, 100);
     let path = temp_filepath("wiremock_reset");
 
@@ -258,7 +258,7 @@ async fn test_connection_reset() {
         .add_download(
             format!("{}/test-file.bin", mock_server.uri()),
             path.clone(),
-            1, // 👈 1 segment: avoids multi-segment math mismatches!
+            1, // 1 segment: avoids multi-segment math mismatches!
             VerifierMaybe::none(),
             default_test_headers(),
             no_retry_scheme(), // max_attempts: 0 -> fails immediately
@@ -274,29 +274,24 @@ async fn test_connection_reset() {
     info!("Final status before polling: {:?}", final_status);
     let mut i = 0;
     while start.elapsed() < Duration::from_secs(5) {
-        info!("Polling for download status (iteration {})...", i);
         let status = manager.get_item_status(&id).unwrap();
+        info!("Poll {}: status = {:?}", i, status.state);
         if matches!(status.state, DownloadState::Failed(_)) {
             final_status = Some(status);
             break;
         }
-        info!("Current status: {:?}", status.state);
         tokio::time::sleep(Duration::from_millis(100)).await;
-        info!("Never again");
         i += 1;
     }
-    info!("Final status after polling: {:?}", final_status);
 
-    let status = final_status.expect("Download did not enter Failed state within 5s");
-
-    // Assert that it failed with NetworkError due to the 2s timeout
+    let final_status = final_status.expect("Download should have failed");
     assert!(
         matches!(
-            status.state,
-            DownloadState::Failed(DownloadRunError::NetworkError(_))
+            final_status.state,
+            DownloadState::Failed(ref e) if matches!(e, DownloadRunError::NetworkError(_))
         ),
         "Expected NetworkError, got: {:?}",
-        status.state
+        final_status.state
     );
 
     cleanup_file(&path).await;
