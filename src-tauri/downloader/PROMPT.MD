@@ -1,40 +1,11 @@
-1. Read InPlaceSegment.rs first. 
-2. Refactor start_internal into a state machine, but DO NOT REPLACE IT. Instead, output start_internal_refactored, so I can choose to replace by renaming it in a single go. Half of it has been done for you(via the half finished connect function). The idea is:
+The internal signatures of `dashload-downloader` have been refactored (state machine introduced, new fields added to DownloadData).
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DownloadingState {
-    Connect,
-    Download { ...extra state you want to pass between goes here  },
-    Retry,
-    Finish,
-}
-
-And:
-```rust
-impl InPlaceSegment {
-    // 1. The orchestrator (The State Machine Driver)
-    async fn start_internal(&self) -> Result<(), DownloadRunError> {
-        // ... setup checks ...
-        let mut state = DownloadingState::Connect { downloaded: self.data.last_downloaded, attempts: 0 };
-        
-        loop {
-            state = match state {
-                DownloadingState::Connect { ... } => self.handle_connect(...).await?,
-                DownloadingState::Stream { ... } => self.handle_stream(...).await?,
-                DownloadingState::Backoff { ... } => self.handle_backoff(...).await?,
-                DownloadingState::Finished => break,
-            };
-        }
-        Ok(())
-    }
-
-    // 2. Isolated Phase 1
-    async fn handle_connect(&self, ...) -> Result<DownloadingState, DownloadRunError> { ... }
-
-    // 3. Isolated Phase 2
-    async fn handle_stream(&self, ...) -> Result<DownloadingState, DownloadRunError> { ... }
-
-    // 4. Isolated Phase 3
-    async fn handle_backoff(&self, ...) -> Result<DownloadingState, DownloadRunError> { ... }
-}
-```
+Task:
+1. Check out tests/, and run them one by one.
+2. Inspect the compilation and test errors.
+3. Update the outdated test cases in `tests/` to match the new public API (do not weaken any assertions). If the behaviour has deviated from the tests, DOCUMENT IT in the test case and update the assertions accordingly.
+ALSO, let me know.
+4. Run `cargo test` until all tests pass.
+5. Commit the fixes.
+6. Call `@reviewer` to audit the diff and confirm zero regressions.
+7. Do not commit anything. Keep your changes in the working tree

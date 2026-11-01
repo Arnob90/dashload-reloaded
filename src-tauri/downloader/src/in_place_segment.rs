@@ -297,213 +297,7 @@ impl InPlaceSegment {
             .map(FetchResponseOutcome::Response)
             .map_err(|e| DownloadRunError::NetworkError(e.to_string()))
     }
-    /// Internal execution loop for downloading the segment chunks directly to disk.
-    /// Handles range requests, resume logic, progress polling, and pause/stop commands.
-    /// In process of refactoring into a state machine
     async fn start_internal(&self) -> Result<(), DownloadRunError> {
-        let status = self.sender.borrow().clone().state;
-        if !matches!(status, DownloadState::Running { .. }) {
-            return Ok(());
-        }
-
-        let total_size = if let Some(info) = &self.data.info {
-            Some(info.size())
-        } else {
-            InPlaceSegment::get_total_size(self.client.clone(), &self.data).await
-        };
-
-        if let Some(size) = total_size
-            && self.data.last_downloaded >= size
-        {
-            let _ = self.sender.send(DownloadStatus {
-                total: total_size,
-                downloaded: self.data.last_downloaded,
-                state: DownloadState::Completed { size },
-            });
-            return Ok(());
-        }
-
-        let mut file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&self.data.filepath)
-            .await?;
-
-        let mut downloaded = self.data.last_downloaded;
-        let mut attempts = 0;
-        //TODO: Make this configurable in the future, but for now, 10s is a reasonable default.
-        let chunk_wait_timeout = Duration::from_secs(10);
-
-        // OUTER RECONNECT / RETRY LOOP
-        loop {
-            // Seek to current downloaded position before connecting
-            let base_start = self.data.info.as_ref().map(|i| i.start).unwrap_or(0);
-            file.seek(std::io::SeekFrom::Start(base_start + downloaded))
-                .await?;
-
-            // Build fresh request from live `downloaded` offset
-            let mut req = self.client.get(&self.data.url);
-            let range_header = match (&self.data.info, downloaded) {
-                (Some(i), d) => Some(format!("bytes={}-{}", i.start + d, i.end)),
-                (None, d) if d > 0 => Some(format!("bytes={}-", d)),
-                _ => None,
-            };
-
-            if let Some(header) = &range_header {
-                req = req.header("Range", header);
-            }
-
-            let headers = &self.data.headers;
-            if let Some(cookies) = &headers.cookies {
-                req = req.header("Cookie", cookies);
-            }
-            if let Some(referrer) = &headers.referrer {
-                req = req.header("Referer", referrer);
-            }
-            if let Some(user_agent) = &headers.user_agent {
-                req = req.header("User-Agent", user_agent);
-            }
-
-            let mut cmd_rx = self.command_reciever.clone();
-            let command = *cmd_rx.borrow();
-            // Check for command before handshake
-            match command {
-                SegmentCommand::Stop => {
-                    let _ = self.sender.send(DownloadStatus {
-                        total: total_size,
-                        downloaded,
-                        state: DownloadState::Stopped,
-                    });
-                    return Ok(());
-                }
-                SegmentCommand::Pause => {
-                    let _ = self.sender.send(DownloadStatus {
-                        total: total_size,
-                        downloaded,
-                        state: DownloadState::Paused,
-                    });
-                    file.flush().await?;
-                    return Ok(());
-                }
-                SegmentCommand::Nothing => {}
-            }
-
-            // Connect with cancel-safe handshake
-            let res_result = tokio::select! {
-                http_res = req.send() => http_res,
-                _ = cmd_rx.changed() => {
-                    let cmd = *cmd_rx.borrow();
-                    match cmd {
-                        SegmentCommand::Pause => {
-                            let _ = self.sender.send(DownloadStatus {
-                                total: total_size,
-                                downloaded,
-                                state: DownloadState::Paused,
-                            });
-                            file.flush().await?;
-                            return Ok(());
-                        }
-                        SegmentCommand::Stop => {
-                            let _ = self.sender.send(DownloadStatus {
-                                total: total_size,
-                                downloaded,
-                                state: DownloadState::Stopped,
-                            });
-                            return Ok(());
-                        }
-                        SegmentCommand::Nothing => {
-                            return Err(DownloadRunError::NetworkError(
-                                "Unexpected command received".to_owned(),
-                            ));
-                        }
-                    }
-                }
-            };
-
-            // If initial handshake fails, retry with backoff
-            let mut res = match res_result {
-                Ok(r) => {
-                    attempts = 0;
-                    r
-                }
-                Err(_e) if attempts < self.retry_scheme.max_attempts => {
-                    attempts += 1;
-                    let delay = self.retry_internal(attempts, total_size, downloaded).await;
-                    tokio::time::sleep(delay).await;
-                    continue; // Reconnect!
-                }
-                Err(e) => return Err(DownloadRunError::NetworkError(e.to_string())),
-            };
-
-            let status = res.status();
-            if range_header.is_some() && status != StatusCode::PARTIAL_CONTENT {
-                return Err(DownloadRunError::ServerError(
-                    "Server does not support range requests".to_owned(),
-                ));
-            } else if !status.is_success() {
-                return Err(DownloadRunError::NetworkError(format!(
-                    "Server returned HTTP {}",
-                    status
-                )));
-            }
-
-            // Stream chunks using the helper
-            match self
-                .stream_chunks(
-                    &mut res,
-                    &mut file,
-                    &mut downloaded,
-                    total_size,
-                    chunk_wait_timeout,
-                )
-                .await
-            {
-                Ok(StreamChunkResult::Finished) => {
-                    break; // Completed!
-                }
-                Ok(StreamChunkResult::Interrupted(cmd)) => {
-                    let state = match cmd {
-                        SegmentCommand::Pause => DownloadState::Paused,
-                        SegmentCommand::Stop => DownloadState::Stopped,
-                        SegmentCommand::Nothing => unreachable!(),
-                    };
-                    let _ = self.sender.send(DownloadStatus {
-                        total: total_size,
-                        downloaded,
-                        state,
-                    });
-                    file.flush().await?;
-                    return Ok(());
-                }
-                // On chunk read timeout or socket drop, retry with backoff
-                Err(DownloadRunError::NetworkError(_) | DownloadRunError::TimeoutError)
-                    if attempts < self.retry_scheme.max_attempts =>
-                {
-                    attempts += 1;
-                    let delay = self.retry_internal(attempts, total_size, downloaded).await;
-                    file.flush().await?;
-                    tokio::time::sleep(delay).await;
-                    continue; // Reconnects from the updated `downloaded` offset!
-                }
-                Err(fatal_err) => return Err(fatal_err),
-            }
-        }
-
-        file.flush().await?;
-        let _ = self.sender.send(DownloadStatus {
-            downloaded,
-            total: Some(downloaded),
-            state: DownloadState::Completed { size: downloaded },
-        });
-
-        Ok(())
-    }
-
-    /// Refactored execution driver that runs `start_internal` as an explicit
-    /// state machine. Intentionally unused until renamed to `start_internal`.
-    #[allow(dead_code)]
-    async fn start_internal_refactored(&self) -> Result<(), DownloadRunError> {
         let status = self.sender.borrow().clone().state;
         if !matches!(status, DownloadState::Running { .. }) {
             return Ok(());
@@ -551,15 +345,24 @@ impl InPlaceSegment {
                 DownloadingState::Connect {
                     downloaded,
                     attempts,
-                } => self.handle_connect(&mut session, downloaded, attempts).await?,
+                } => {
+                    self.handle_connect(&mut session, downloaded, attempts)
+                        .await?
+                }
                 DownloadingState::Download {
                     downloaded,
                     attempts,
-                } => self.handle_stream(&mut session, downloaded, attempts).await?,
+                } => {
+                    self.handle_stream(&mut session, downloaded, attempts)
+                        .await?
+                }
                 DownloadingState::Retry {
                     downloaded,
                     attempts,
-                } => self.handle_backoff(&mut session, downloaded, attempts).await?,
+                } => {
+                    self.handle_backoff(&mut session, downloaded, attempts)
+                        .await?
+                }
                 DownloadingState::Finish {
                     downloaded,
                     completed,
@@ -612,7 +415,8 @@ impl InPlaceSegment {
         }
 
         let cmd_rx = self.command_reciever.clone();
-        match *cmd_rx.borrow() {
+        let state = *cmd_rx.borrow();
+        match state {
             SegmentCommand::Stop => {
                 let _ = self.sender.send(DownloadStatus {
                     total: session.total_size,
@@ -666,6 +470,24 @@ impl InPlaceSegment {
         };
 
         let status = res.status();
+
+        // Retryable transient server failures share the connect-phase retry
+        // budget. This must run before the range check so that a transient
+        // `503` on a ranged request is not misreported as a missing range
+        // capability.
+        if is_retryable_http_status(status) {
+            if attempts < self.retry_scheme.max_attempts {
+                return Ok(DownloadingState::Retry {
+                    downloaded,
+                    attempts: attempts + 1,
+                });
+            }
+            return Err(DownloadRunError::NetworkError(format!(
+                "Server returned HTTP {}",
+                status
+            )));
+        }
+
         if range_header.is_some() && status != StatusCode::PARTIAL_CONTENT {
             return Err(DownloadRunError::ServerError(
                 "Server does not support range requests".to_owned(),
@@ -695,7 +517,8 @@ impl InPlaceSegment {
         // The watch receiver only notifies on changes made after `changed()` is
         // armed, so a pause/stop that arrived between handshake and stream must
         // be caught by reading the live value here.
-        match *self.command_reciever.borrow() {
+        let state = *self.command_reciever.borrow();
+        match state {
             SegmentCommand::Pause => {
                 let _ = self.sender.send(DownloadStatus {
                     total: session.total_size,
@@ -818,6 +641,21 @@ impl InPlaceSegment {
         });
         delay
     }
+}
+
+/// Statuses that indicate a transient server-side condition worth retrying.
+/// Deliberately excludes client errors such as 400/401/403/404/410/416.
+fn is_retryable_http_status(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::REQUEST_TIMEOUT            // 408
+            | StatusCode::TOO_EARLY            // 425
+            | StatusCode::TOO_MANY_REQUESTS    // 429
+            | StatusCode::INTERNAL_SERVER_ERROR // 500
+            | StatusCode::BAD_GATEWAY          // 502
+            | StatusCode::SERVICE_UNAVAILABLE  // 503
+            | StatusCode::GATEWAY_TIMEOUT // 504
+    )
 }
 
 /// Constructs the HTTP `Range` header value for resuming or segmented downloads.
