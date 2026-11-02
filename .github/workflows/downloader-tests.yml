@@ -2,7 +2,9 @@ name: Downloader Integration Tests
 
 on:
   push:
-  workflow_dispatch:
+    branches: [master]
+  workflow_dispatch: 
+    branches: [master]
 
 permissions:
   contents: read
@@ -37,4 +39,4 @@ jobs:
           workspaces: src-tauri/downloader -> target
 
       - name: Run integration tests
-        run: cargo test --locked --tests
+        run: cargo test --locked 
