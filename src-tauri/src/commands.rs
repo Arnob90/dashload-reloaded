@@ -4,6 +4,7 @@ use downloader::download_manager::{DownloadManager, ManagerError};
 use downloader::download_status::DownloadStatus;
 use downloader::get_download_info::{get_download_info, DownloadInfo, DownloadInfoGetError};
 use downloader::request_headers::RequestHeaders;
+use downloader::retry_scheme::RetryScheme;
 use downloader::serialization_error::DataSerializationError;
 use downloader::verifier::VerifierMaybe;
 use std::collections::HashMap;
@@ -46,6 +47,7 @@ async fn add_download(
             number_of_segments,
             verifier,
             request_headers,
+            RetryScheme::default(),
         )
         .await?)
 }
@@ -85,7 +87,7 @@ async fn get_download_metadata(
     state: State<'_, AppState>,
     url: &str,
 ) -> Result<DownloadInfo, ApiError<DownloadInfoGetError>> {
-    Ok(get_download_info(state.client.clone(), url).await?)
+    Ok(get_download_info(state.client.clone(), url, reqwest::header::HeaderMap::new()).await?)
 }
 
 #[tauri::command]
