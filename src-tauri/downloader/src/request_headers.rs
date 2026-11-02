@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Optional HTTP headers to include with download requests.
 /// All fields are optional; missing fields are omitted from the request.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RequestHeaders {
     /// `Cookie` header value.
     pub cookies: Option<String>,
@@ -62,6 +62,18 @@ impl RequestHeaders {
             cookies,
             referrer,
             user_agent,
+        }
+    }
+}
+
+impl Default for RequestHeaders {
+    fn default() -> Self {
+        RequestHeaders {
+            cookies: None,
+            referrer: None,
+            user_agent: Some(
+                "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0".to_string(),
+            ),
         }
     }
 }

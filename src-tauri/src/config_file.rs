@@ -1,7 +1,7 @@
-use std::path::PathBuf;
-
+use downloader::request_headers::RequestHeaders;
 use downloader::retry_scheme::RetryScheme;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     pub auto_add_download: bool,
@@ -11,6 +11,8 @@ pub struct Config {
     /// existing config file so older configs keep loading.
     #[serde(default)]
     pub retry_scheme: RetryScheme,
+    #[serde(default)]
+    pub request_headers: RequestHeaders,
 }
 
 impl Default for Config {
@@ -20,6 +22,7 @@ impl Default for Config {
             default_download_path: dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")),
             default_number_of_segments: 3,
             retry_scheme: RetryScheme::default(),
+            request_headers: RequestHeaders::default(),
         }
     }
 }
