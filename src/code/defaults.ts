@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Config, ConfigSchema, RequestHeaders } from "./typesOfBackend";
+import {
+    Config,
+    ConfigSchema,
+    RequestHeaders,
+    RetryScheme,
+} from "./typesOfBackend";
 
 /**
  * Fallback used only until `initConfigFile()` runs (or if it fails).
@@ -12,6 +17,19 @@ const FALLBACK_REQUEST_HEADERS: RequestHeaders = {
         "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0",
 };
 
+/** Mirrors `RetryScheme::default()`; overridden by the config file. */
+const FALLBACK_RETRY_SCHEME: RetryScheme = {
+    max_attempts: 5,
+    backoff: {
+        base_delay: { secs: 1, nanos: 0 },
+        max_delay: { secs: 30, nanos: 0 },
+        factor: 2.0,
+        jitter: true,
+    },
+    stream_timeout: { secs: 5, nanos: 0 },
+    connection_timeout: { secs: 10, nanos: 0 },
+};
+
 /** Config loaded from the backend at startup by `initConfigFile()`. */
 export let CONFIG: Config | null = null;
 
@@ -20,6 +38,12 @@ export let CONFIG: Config | null = null;
  * Replaced with the config file's `request_headers` during initialization.
  */
 export let DEFAULT_REQUEST_HEADERS: RequestHeaders = FALLBACK_REQUEST_HEADERS;
+
+/**
+ * Retry policy applied to new downloads.
+ * Replaced with the config file's `retry_scheme` during initialization.
+ */
+export let DEFAULT_RETRY_SCHEME: RetryScheme = FALLBACK_RETRY_SCHEME;
 
 /** Fetches and validates the backend config file. */
 export async function getConfigFile(): Promise<Config> {
@@ -35,5 +59,7 @@ export async function initConfigFile(): Promise<Config> {
     const config = await getConfigFile();
     CONFIG = config;
     DEFAULT_REQUEST_HEADERS = config.request_headers;
+    DEFAULT_RETRY_SCHEME = config.retry_scheme;
     return config;
 }
+

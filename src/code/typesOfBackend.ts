@@ -46,19 +46,6 @@ export const RetrySchemeSchema = z.object({
 });
 export type RetryScheme = z.infer<typeof RetrySchemeSchema>;
 
-/** Mirrors `RetryScheme::default()` in the downloader crate. */
-export const DEFAULT_RETRY_SCHEME: RetryScheme = {
-    max_attempts: 5,
-    backoff: {
-        base_delay: { secs: 1, nanos: 0 },
-        max_delay: { secs: 30, nanos: 0 },
-        factor: 2.0,
-        jitter: true,
-    },
-    stream_timeout: { secs: 5, nanos: 0 },
-    connection_timeout: { secs: 10, nanos: 0 },
-};
-
 // ============================================================================
 // 2. Config
 // ============================================================================
