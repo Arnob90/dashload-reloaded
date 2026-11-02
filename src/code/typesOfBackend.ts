@@ -19,7 +19,47 @@ export const RequestHeadersSchema = z.object({
 });
 export type RequestHeaders = z.infer<typeof RequestHeadersSchema>;
 
-export const DEFAULT_REQUEST_HEADERS: RequestHeaders = { cookies: null, referrer: null, user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0", };
+export const DEFAULT_REQUEST_HEADERS: RequestHeaders = { cookies: null, referrer: null, user_agent: "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0", };
+
+// ============================================================================
+// 1b. Retry scheme
+// ============================================================================
+/** Rust: std::time::Duration serializes as `{ secs, nanos }`. */
+export const DurationSchema = z.object({
+    secs: z.number(),
+    nanos: z.number(),
+});
+export type Duration = z.infer<typeof DurationSchema>;
+
+export const ExponentialBackoffSchema = z.object({
+    base_delay: DurationSchema,
+    max_delay: DurationSchema,
+    factor: z.number(),
+    jitter: z.boolean(),
+});
+export type ExponentialBackoff = z.infer<typeof ExponentialBackoffSchema>;
+
+/** Max attempt counts retries after the initial attempt. */
+export const RetrySchemeSchema = z.object({
+    max_attempts: z.number(),
+    backoff: ExponentialBackoffSchema,
+    stream_timeout: DurationSchema,
+    connection_timeout: DurationSchema,
+});
+export type RetryScheme = z.infer<typeof RetrySchemeSchema>;
+
+/** Mirrors `RetryScheme::default()` in the downloader crate. */
+export const DEFAULT_RETRY_SCHEME: RetryScheme = {
+    max_attempts: 5,
+    backoff: {
+        base_delay: { secs: 1, nanos: 0 },
+        max_delay: { secs: 30, nanos: 0 },
+        factor: 2.0,
+        jitter: true,
+    },
+    stream_timeout: { secs: 5, nanos: 0 },
+    connection_timeout: { secs: 10, nanos: 0 },
+};
 
 // ============================================================================
 // 2. Config
@@ -27,7 +67,9 @@ export const DEFAULT_REQUEST_HEADERS: RequestHeaders = { cookies: null, referrer
 export const ConfigSchema = z.object({
     auto_add_download: z.boolean(),
     default_download_path: z.string(),
-    default_number_of_segments: z.number()
+    default_number_of_segments: z.number(),
+    retry_scheme: RetrySchemeSchema,
+    request_headers: RequestHeadersSchema,
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
@@ -53,6 +95,9 @@ export const DownloadRunErrorSchema = z.discriminatedUnion("kind", [
     }),
     z.object({
         kind: z.literal("VerifyError"),
+    }),
+    z.object({
+        kind: z.literal("TimeoutError"),
     }),
 ]);
 
@@ -82,6 +127,14 @@ export const DownloadStateSchema = z.discriminatedUnion("kind", [
     }),
     z.object({ kind: z.literal("Paused") }),
     z.object({ kind: z.literal("Verifying") }),
+    z.object({
+        kind: z.literal("Retrying"),
+        payload: z.object({
+            attempt: z.number(),
+            max_attempts: z.number(),
+            wait_secs: z.number(),
+        }),
+    }),
 ]);
 
 export type DownloadState = z.infer<typeof DownloadStateSchema>;
@@ -109,14 +162,14 @@ export type GetStatusFullResult = z.infer<typeof GetStatusFullResultSchema>;
 // ============================================================================
 // 3. Data serialization errors
 // ============================================================================
-export const DataSerializationErrorSchema = z.discriminatedUnion("kind", [
+// Rust `DataSerializationError` is a plain (externally tagged) serde enum, so
+// it serializes as `{ "IoError": "..." }` / `{ "DeserializationError": "..." }`.
+export const DataSerializationErrorSchema = z.union([
     z.object({
-        kind: z.literal("IoError"),
-        payload: z.string(),
+        IoError: z.string(),
     }),
     z.object({
-        kind: z.literal("DeserializationError"),
-        payload: z.string(),
+        DeserializationError: z.string(),
     }),
 ]);
 
@@ -140,6 +193,14 @@ export const ManagerErrorSchema = z.discriminatedUnion("kind", [
     }),
     z.object({
         kind: z.literal("OperationFailed"),
+        payload: z.string(),
+    }),
+    z.object({
+        kind: z.literal("InvalidHeaders"),
+        payload: z.string(),
+    }),
+    z.object({
+        kind: z.literal("SegmentedNotSupported"),
         payload: z.string(),
     }),
 ]);
@@ -215,8 +276,8 @@ export const DownloadDataSchema = z.object({
     segments: z.array(InPlaceSegmentDataSchema),
     length: z.number().nullable(),
     state: DownloadStateSchema,
-    verifier: VerifierMaybeSchema
-
+    verifier: VerifierMaybeSchema,
+    retry_scheme: RetrySchemeSchema,
 })
 export type DownloadData = z.infer<typeof DownloadDataSchema>
 

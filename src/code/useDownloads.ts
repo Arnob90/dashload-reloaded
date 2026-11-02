@@ -15,7 +15,7 @@ import {
     getConfigFile,
     saveSession,
 } from "./apiCommunicate.ts"; // Your invoke file
-import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, VerifierMaybe, RequestHeaders } from "./typesOfBackend";
+import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, VerifierMaybe, RequestHeaders, RetryScheme } from "./typesOfBackend";
 
 // ============================================================================
 // 1. Centralized Query Keys
@@ -64,7 +64,7 @@ export function useDownloadMetadata(url: string | undefined) {
 
 export function useFetchMetadata() {
     return useMutation({
-        mutationFn: getDownloadMetadata,
+        mutationFn: (url: string) => getDownloadMetadata(url),
     });
 }
 
@@ -97,14 +97,16 @@ export function useAddDownload() {
             filepath,
             numberOfSegments,
             verifier,
-            requestHeaders
+            requestHeaders,
+            retryScheme
         }: {
             url: string;
             filepath: string;
             numberOfSegments: number;
             verifier: VerifierMaybe
             requestHeaders?: RequestHeaders
-        }) => addDownload(url, filepath, numberOfSegments, verifier, requestHeaders),
+            retryScheme?: RetryScheme
+        }) => addDownload(url, filepath, numberOfSegments, verifier, requestHeaders, retryScheme),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: downloadKeys.all })
         },
