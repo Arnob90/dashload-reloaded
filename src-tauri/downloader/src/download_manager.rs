@@ -11,7 +11,6 @@ use crate::segmented_verifier::verify_segmented;
 use crate::serialization_error::DataSerializationError;
 use crate::verifier::VerifierMaybe;
 use dashmap::DashMap;
-use log::info;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;

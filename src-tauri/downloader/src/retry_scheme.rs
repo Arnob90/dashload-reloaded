@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use rand;
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +42,8 @@ impl ExponentialBackoff {
 pub struct RetryScheme {
     pub max_attempts: u32,
     pub backoff: ExponentialBackoff,
+    pub stream_timeout: Duration,
+    pub connection_timeout: Duration,
 }
 
 impl Default for ExponentialBackoff {
@@ -58,6 +62,8 @@ impl Default for RetryScheme {
         Self {
             max_attempts: 5,
             backoff: ExponentialBackoff::default(),
+            stream_timeout: Duration::from_secs(5),
+            connection_timeout: Duration::from_secs(10),
         }
     }
 }

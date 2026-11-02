@@ -66,6 +66,8 @@ pub fn no_retry_scheme() -> RetryScheme {
             1.0,
             false,
         ),
+        stream_timeout: Duration::from_secs(5),
+        connection_timeout: Duration::from_secs(10),
     }
 }
 

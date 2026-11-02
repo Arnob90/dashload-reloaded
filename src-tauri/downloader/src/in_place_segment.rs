@@ -66,7 +66,6 @@ pub enum DownloadingState {
 struct DownloadSession {
     file: tokio::fs::File,
     total_size: Option<u64>,
-    chunk_wait_timeout: Duration,
     response: Option<reqwest::Response>,
 }
 
@@ -344,7 +343,6 @@ impl InPlaceSegment {
             file,
             total_size,
             //TODO: Make this configurable in the future, but for now, 10s is a reasonable default.
-            chunk_wait_timeout: Duration::from_secs(10),
             response: None,
         };
 
@@ -471,9 +469,8 @@ impl InPlaceSegment {
             }
             SegmentCommand::Nothing => {}
         }
-        // TODO: Make this configurable
         let res_timed_out_maybe = tokio::time::timeout(
-            Duration::from_secs(10),
+            self.retry_scheme.connection_timeout,
             self.fetch_res_unless_interrupt(
                 req,
                 cmd_rx.clone(),
@@ -615,7 +612,7 @@ impl InPlaceSegment {
                 &mut current_downloaded,
                 &mut attempts,
                 session.total_size,
-                session.chunk_wait_timeout,
+                self.retry_scheme.stream_timeout,
             )
             .await;
 
