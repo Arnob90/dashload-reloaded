@@ -24,7 +24,7 @@ You are an adversarial, hyper-focused code reviewer. Your only job is to audit r
 
 ### Inspection Scope
 
-1. Inspect the diff using `git diff HEAD~1` (or the specific commit provided).
+1. Inspect changes in worktree(use git if necessary)
 2. Read the original files around the modified regions to understand full context.
 3. Check for:
    - Concurrency bugs (race conditions, deadlocks, lock contention).
