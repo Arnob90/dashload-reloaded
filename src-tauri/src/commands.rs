@@ -38,6 +38,7 @@ async fn add_download(
     number_of_segments: u64,
     verifier: VerifierMaybe,
     request_headers: RequestHeaders,
+    retry_scheme: RetryScheme,
 ) -> Result<String, ApiError<ManagerError>> {
     Ok(state
         .download_manager
@@ -47,7 +48,7 @@ async fn add_download(
             number_of_segments,
             verifier,
             request_headers,
-            RetryScheme::default(),
+            retry_scheme,
         )
         .await?)
 }
@@ -86,8 +87,12 @@ fn get_item_status(
 async fn get_download_metadata(
     state: State<'_, AppState>,
     url: &str,
+    request_headers: RequestHeaders,
 ) -> Result<DownloadInfo, ApiError<DownloadInfoGetError>> {
-    Ok(get_download_info(state.client.clone(), url, reqwest::header::HeaderMap::new()).await?)
+    let headers = request_headers
+        .to_header_map()
+        .map_err(|e| DownloadInfoGetError::RequestError(e.to_string()))?;
+    Ok(get_download_info(state.client.clone(), url, headers).await?)
 }
 
 #[tauri::command]
