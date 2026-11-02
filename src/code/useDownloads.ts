@@ -12,9 +12,9 @@ import {
     resume,
     getData,
     getItemStatus,
-    getConfigFile,
     saveSession,
 } from "./apiCommunicate.ts"; // Your invoke file
+import { getConfigFile } from "./defaults.ts";
 import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, VerifierMaybe, RequestHeaders, RetryScheme } from "./typesOfBackend";
 
 // ============================================================================

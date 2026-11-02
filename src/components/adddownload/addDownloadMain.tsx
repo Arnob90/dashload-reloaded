@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Modal } from "@mantine/core";
-import { DEFAULT_REQUEST_HEADERS, DownloadInfo, RequestHeaders } from "../../code/typesOfBackend";
+import { DownloadInfo, RequestHeaders } from "../../code/typesOfBackend";
+import { DEFAULT_REQUEST_HEADERS } from "../../code/defaults";
 import { AddDownloadUrl } from "./addDownloadUrl";
 import { RunDownloadDialog } from "./runDownload";
 

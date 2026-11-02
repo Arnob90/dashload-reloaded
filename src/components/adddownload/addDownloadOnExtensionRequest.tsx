@@ -3,7 +3,7 @@ import { ExternalRequestMap } from "../../code/externalDownloadRequestQueue";
 import { RunDownloadDialog } from "./runDownload";
 import { Box, LoadingOverlay, Modal } from "@mantine/core";
 import { useDownloadMetadata } from "../../code/useDownloads";
-import { DEFAULT_REQUEST_HEADERS } from "../../code/typesOfBackend";
+import { DEFAULT_REQUEST_HEADERS } from "../../code/defaults";
 import { notifications } from "@mantine/notifications";
 
 interface ExtensionRequestDownloadProps {

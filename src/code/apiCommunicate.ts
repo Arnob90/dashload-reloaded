@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core"
 import z from "zod"
-import { DownloadDataMap, DownloadDataMapSchema, DownloadInfo, DownloadInfoSchema, DownloadStatusMapSchema, DownloadStatusMap, ManagerApiErrorSchema, DownloadInfoGetApiErrorSchema, VerifierMaybe, DEFAULT_REQUEST_HEADERS, DEFAULT_RETRY_SCHEME, RetryScheme, RequestHeaders, ConfigSchema, Config, DataSerializationApiErrorSchema, DownloadStatusSchema } from "./typesOfBackend"
+import { DownloadDataMap, DownloadDataMapSchema, DownloadInfo, DownloadInfoSchema, DownloadStatusMapSchema, DownloadStatusMap, ManagerApiErrorSchema, DownloadInfoGetApiErrorSchema, VerifierMaybe, DEFAULT_RETRY_SCHEME, RetryScheme, RequestHeaders, DataSerializationApiErrorSchema, DownloadStatusSchema } from "./typesOfBackend"
 import type { DownloadStatus } from "./typesOfBackend"
+import { DEFAULT_REQUEST_HEADERS } from "./defaults"
 export async function addDownload(
     url: string,
     filepath: string,
@@ -100,16 +101,6 @@ export async function getItemStatus(id: string): Promise<DownloadStatus> {
             id: id
         })
         return await DownloadStatusSchema.parseAsync(res)
-    }
-    catch (err) {
-        throw ManagerApiErrorSchema.parse(err)
-    }
-}
-
-export async function getConfigFile(): Promise<Config> {
-    try {
-        const res = await invoke("get_config_file")
-        return await ConfigSchema.parseAsync(res)
     }
     catch (err) {
         throw ManagerApiErrorSchema.parse(err)
