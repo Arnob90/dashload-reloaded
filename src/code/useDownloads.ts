@@ -48,23 +48,26 @@ export function useDownloadStatus(pollIntervalMs = 300) {
  * Fetches metadata (filename, filesize, range support) for a given URL.
  * Only executes when a non-empty URL is provided.
  */
-export function useDownloadMetadata(url: string | undefined) {
+export function useDownloadMetadata(url: string | undefined, requestHeaders?: RequestHeaders) {
     return useQuery<DownloadInfo>({
         queryKey: downloadKeys.metadata(url ?? ""),
         queryFn: () => {
             if (!url?.trim()) {
                 throw new Error("A non empty URL is required to fetch metadata.");
             }
-            return getDownloadMetadata(url);
+            return getDownloadMetadata(url, requestHeaders);
         },
         enabled: Boolean(url?.trim()),
         staleTime: 1000 * 60 * 5, // Cache metadata for 5 minutes
     });
 }
-
+export interface MetadataMutationVariables {
+    url: string;
+    requestHeaders?: RequestHeaders;
+}
 export function useFetchMetadata() {
     return useMutation({
-        mutationFn: (url: string) => getDownloadMetadata(url),
+        mutationFn: ({ url, requestHeaders }: MetadataMutationVariables) => getDownloadMetadata(url, requestHeaders),
     });
 }
 

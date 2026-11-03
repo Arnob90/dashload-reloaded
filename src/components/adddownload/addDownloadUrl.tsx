@@ -3,17 +3,24 @@ import { DownloadInfo, DownloadInfoGetApiError, DownloadInfoGetApiErrorSchema } 
 import { useState } from "react";
 import { useFetchMetadata } from "../../code/useDownloads";
 import { notifications } from "@mantine/notifications";
+import { CollapseSection } from "./collapseSection";
+import { useDisclosure } from "@mantine/hooks";
+import { RequestHeadersSection } from "./requestHeadersSection";
+import { useRequestHeaders } from "./useRequestHeaders";
 export interface AddDownloadProps {
     error?: DownloadInfoGetApiError,
     submitMetadata?: (info: DownloadInfo) => void;
 }
 
+
 export function AddDownloadUrl({ submitMetadata, error: err }: AddDownloadProps) {
     const [url, setUrl] = useState("");
     const getDownloadMetadataMutation = useFetchMetadata()
+    const [expanded, { toggle }] = useDisclosure(false);
+    const [requestHeaders, setRequestHeaders] = useRequestHeaders();
     const submit = async () => {
         try {
-            const metadata = await getDownloadMetadataMutation.mutateAsync(url)
+            const metadata = await getDownloadMetadataMutation.mutateAsync({ url, requestHeaders })
             submitMetadata?.(metadata)
         }
         catch (err) {
@@ -39,6 +46,9 @@ export function AddDownloadUrl({ submitMetadata, error: err }: AddDownloadProps)
                     {err?.payload && <Text c={"red"}>{err.payload}</Text>}
                     <Button type="submit">Download</Button>
                 </Flex>
+                <CollapseSection label="Advanced Options" toggleFunction={toggle} opened={expanded}>
+                    <RequestHeadersSection requestHeaders={requestHeaders} setRequestHeaders={setRequestHeaders} />
+                </CollapseSection>
             </form>
         </>
     )
