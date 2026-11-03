@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActionIcon, Box, Divider, Flex, Group, Badge, Menu, Paper, Progress, Tabs, Table, Text } from "@mantine/core";
+import { ActionIcon, Box, Flex, Group, Badge, Menu, Progress, Table, Text } from "@mantine/core";
 import { bytesToMIB } from "../../code/utils.ts";
 import {
     createColumnHelper,
@@ -22,6 +22,7 @@ import { ChevronRight, FolderOpen, Pause, Trash, FileArchive, FileCode, File as 
 import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener"
 import { useTableEntries, TableEntry } from "./tableEntry.ts";
 import { formatTime } from "../../code/utils.ts";
+import { DownloadDetailsPane } from "./downloadDetails.tsx";
 
 const features = tableFeatures({
     rowSortingFeature,
@@ -40,74 +41,6 @@ function getFileIcon(filename: string) {
 }
 
 const columnHelper = createColumnHelper<typeof features, TableEntry>();
-
-function DownloadDetailsPane({ entry }: { entry: TableEntry }) {
-    const colorMap: Record<string, string> = {
-        Running: "blue",
-        Completed: "teal",
-        Paused: "yellow",
-        Failed: "red",
-        Stopped: "gray",
-    };
-    const pct = entry.downloadedPortion != null ? Math.round(entry.downloadedPortion * 100) : 0;
-
-    return (
-        <Paper
-            withBorder
-            h={220}
-            bg="dark.7"
-            style={{ borderTop: "1px solid var(--mantine-color-dark-4)" }}
-            p="xs"
-        >
-            <Tabs defaultValue="overview">
-                <Tabs.List>
-                    <Tabs.Tab value="overview">Overview</Tabs.Tab>
-                    <Tabs.Tab value="headers">HTTP Context</Tabs.Tab>
-                </Tabs.List>
-
-                <Tabs.Panel value="overview" pt="xs">
-                    <Group justify="space-between" mb="xs">
-                        <Text size="sm" fw={600}>{entry.filename}</Text>
-                        <Badge color={colorMap[entry.status.kind] ?? "gray"} variant="light" size="sm">
-                            {entry.status.kind}
-                        </Badge>
-                    </Group>
-                    <Text size="xs" c="dimmed">URL: {entry.url}</Text>
-                    <Text size="xs" c="dimmed">Destination: {entry.filepath}</Text>
-                    <Progress
-                        value={pct}
-                        size="md"
-                        radius="xl"
-                        color={pct === 100 ? "teal" : "blue"}
-                        striped={pct < 100 && pct > 0}
-                        animated={pct < 100 && pct > 0}
-                    />
-                    <Text size="xs" c="dimmed" ta="center" mt="xs">
-                        {pct}% ({bytesToMIB(entry.downloaded).toFixed(1)} MiB / {entry.total != null ? bytesToMIB(entry.total).toFixed(1) : "-"} MiB)
-                    </Text>
-                </Tabs.Panel>
-
-                <Tabs.Panel value="headers" pt="xs">
-                    <Group justify="space-between" mb="xs">
-                        <Text size="xs" c="dimmed">User-Agent</Text>
-                        <Text size="xs" fw={500}>{entry.headers.userAgent ?? "-"}</Text>
-                    </Group>
-                    <Divider />
-                    <Group justify="space-between" mb="xs">
-                        <Text size="xs" c="dimmed">Referrer</Text>
-                        <Text size="xs" fw={500}>{entry.headers.referrer ?? "-"}</Text>
-                    </Group>
-                    <Divider />
-                    <Group justify="space-between">
-                        <Text size="xs" c="dimmed">Cookies</Text>
-                        <Text size="xs" fw={500}>{entry.headers.cookies ?? "-"}</Text>
-                    </Group>
-                </Tabs.Panel>
-            </Tabs>
-        </Paper>
-    );
-}
-
 export function DownloadTable() {
     const entries = useTableEntries();
     const tableData = useMemo(() => entries ?? [], [entries]);
@@ -376,7 +309,7 @@ export function DownloadTable() {
             </Box>
 
             {/* 2. FDM-Style Bottom Details Pane */}
-            {selectedEntry && <DownloadDetailsPane entry={selectedEntry} />}
+            {selectedEntry && <DownloadDetailsPane entry={selectedEntry} onClose={() => setSelectedId(null)} />}
         </Flex>
     );
 }

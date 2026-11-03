@@ -24,3 +24,4 @@ dist-ssr
 *.sw?
 src-tauri/downloader/target
 src-tauri/downloader/tests/downloads
+PROMPT.md
