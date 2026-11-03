@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActionIcon, Table, Text, Menu, Group, Badge, Progress } from "@mantine/core";
+import { ActionIcon, Box, Divider, Flex, Group, Badge, Menu, Paper, Progress, Tabs, Table, Text } from "@mantine/core";
 import { bytesToMIB } from "../../code/utils.ts";
 import {
     createColumnHelper,
@@ -41,10 +41,78 @@ function getFileIcon(filename: string) {
 
 const columnHelper = createColumnHelper<typeof features, TableEntry>();
 
+function DownloadDetailsPane({ entry }: { entry: TableEntry }) {
+    const colorMap: Record<string, string> = {
+        Running: "blue",
+        Completed: "teal",
+        Paused: "yellow",
+        Failed: "red",
+        Stopped: "gray",
+    };
+    const pct = entry.downloadedPortion != null ? Math.round(entry.downloadedPortion * 100) : 0;
+
+    return (
+        <Paper
+            withBorder
+            h={220}
+            bg="dark.7"
+            style={{ borderTop: "1px solid var(--mantine-color-dark-4)" }}
+            p="xs"
+        >
+            <Tabs defaultValue="overview">
+                <Tabs.List>
+                    <Tabs.Tab value="overview">Overview</Tabs.Tab>
+                    <Tabs.Tab value="headers">HTTP Context</Tabs.Tab>
+                </Tabs.List>
+
+                <Tabs.Panel value="overview" pt="xs">
+                    <Group justify="space-between" mb="xs">
+                        <Text size="sm" fw={600}>{entry.filename}</Text>
+                        <Badge color={colorMap[entry.status.kind] ?? "gray"} variant="light" size="sm">
+                            {entry.status.kind}
+                        </Badge>
+                    </Group>
+                    <Text size="xs" c="dimmed">URL: {entry.url}</Text>
+                    <Text size="xs" c="dimmed">Destination: {entry.filepath}</Text>
+                    <Progress
+                        value={pct}
+                        size="md"
+                        radius="xl"
+                        color={pct === 100 ? "teal" : "blue"}
+                        striped={pct < 100 && pct > 0}
+                        animated={pct < 100 && pct > 0}
+                    />
+                    <Text size="xs" c="dimmed" ta="center" mt="xs">
+                        {pct}% ({bytesToMIB(entry.downloaded).toFixed(1)} MiB / {entry.total != null ? bytesToMIB(entry.total).toFixed(1) : "-"} MiB)
+                    </Text>
+                </Tabs.Panel>
+
+                <Tabs.Panel value="headers" pt="xs">
+                    <Group justify="space-between" mb="xs">
+                        <Text size="xs" c="dimmed">User-Agent</Text>
+                        <Text size="xs" fw={500}>{entry.headers.userAgent ?? "-"}</Text>
+                    </Group>
+                    <Divider />
+                    <Group justify="space-between" mb="xs">
+                        <Text size="xs" c="dimmed">Referrer</Text>
+                        <Text size="xs" fw={500}>{entry.headers.referrer ?? "-"}</Text>
+                    </Group>
+                    <Divider />
+                    <Group justify="space-between">
+                        <Text size="xs" c="dimmed">Cookies</Text>
+                        <Text size="xs" fw={500}>{entry.headers.cookies ?? "-"}</Text>
+                    </Group>
+                </Tabs.Panel>
+            </Tabs>
+        </Paper>
+    );
+}
+
 export function DownloadTable() {
     const entries = useTableEntries();
     const tableData = useMemo(() => entries ?? [], [entries]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
+    const selectedEntry = entries?.find((e) => e.id === selectedId);
     const { mutate: pauseDownload } = usePauseDownload();
     const { mutate: resumeDownload } = useResumeDownload();
     const [sorting, setSorting] = useState<SortingState>([])
@@ -239,68 +307,76 @@ export function DownloadTable() {
     }
 
     return (
-        <SelectableItemsTable setSelectedId={setSelectedId} verticalSpacing="sm" horizontalSpacing="md" highlightOnHover style={{ tableLayout: "auto" }}>
-            <Table.Thead bg="dark.8">
-                {tableModel.getHeaderGroups().map((headerGroup) => (
-                    <Table.Tr key={headerGroup.id}>
-                        {headerGroup.headers.map((header) => (
-                            <Table.Th key={header.id}>
-                                <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-                                    {header.isPlaceholder
-                                        ? null
-                                        : flexRender(
-                                            header.column.columnDef.header,
-                                            header.getContext()
-                                        )}
-                                </Text>
-                            </Table.Th>
-                        ))}
-                    </Table.Tr>
-                ))}
-            </Table.Thead>
-            <Table.Tbody>
-                {tableModel.getRowModel().rows.map((row) => (
-                    <Menu key={row.id} shadow="md" width={200} withinPortal>
-                        <Menu.ContextMenu>
-                            <Table.Tr
-                                key={row.id}
-                                tabIndex={0}
-                                onClick={() => {
-                                    if (selectedId === row.original.id) {
-                                        setSelectedId(null);
-                                        return;
-                                    }
-                                    setSelectedId(row.original.id);
-                                }}
-                                className={
-                                    row.original.id === selectedId
-                                        ? `${style.selected_row}`
-                                        : `${style.table_row}`
-                                }
-                            >
-                                {row.getAllCells().map((cell) => (
-                                    <Table.Td key={cell.id}>
-                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                    </Table.Td>
+        <Flex direction="column" h="100%" flex="1" style={{ overflow: "hidden" }}>
+            {/* 1. Main Table (Takes remaining flex height) */}
+            <Box style={{ flex: 1, overflowY: "auto" }}>
+                <SelectableItemsTable setSelectedId={setSelectedId} verticalSpacing="sm" horizontalSpacing="md" highlightOnHover style={{ tableLayout: "auto" }}>
+                    <Table.Thead bg="dark.8">
+                        {tableModel.getHeaderGroups().map((headerGroup) => (
+                            <Table.Tr key={headerGroup.id}>
+                                {headerGroup.headers.map((header) => (
+                                    <Table.Th key={header.id}>
+                                        <Text size="xs" fw={700} c="dimmed" tt="uppercase">
+                                            {header.isPlaceholder
+                                                ? null
+                                                : flexRender(
+                                                    header.column.columnDef.header,
+                                                    header.getContext()
+                                                )}
+                                        </Text>
+                                    </Table.Th>
                                 ))}
                             </Table.Tr>
-                        </Menu.ContextMenu>
-                        <Menu.Dropdown>
-                            <Menu.Item onClick={() => handleOpenFile(row.original.filepath)}>
-                                Open File
-                            </Menu.Item>
-                            <Menu.Item leftSection={<FolderOpen size={16} />}
-                                onClick={() => handleOpenInFileManager(row.original.filepath)}
-                            >
-                                Open in File Manager
-                            </Menu.Item>
-                            <Menu.Item leftSection={<Trash size={16} />} className={style.delete_menu_item}>
-                                Delete
-                            </Menu.Item>
-                        </Menu.Dropdown>
-                    </Menu>
-                ))}
-            </Table.Tbody>
-        </SelectableItemsTable>
+                        ))}
+                    </Table.Thead>
+                    <Table.Tbody>
+                        {tableModel.getRowModel().rows.map((row) => (
+                            <Menu key={row.id} shadow="md" width={200} withinPortal>
+                                <Menu.ContextMenu>
+                                    <Table.Tr
+                                        key={row.id}
+                                        tabIndex={0}
+                                        onClick={() => {
+                                            if (selectedId === row.original.id) {
+                                                setSelectedId(null);
+                                                return;
+                                            }
+                                            setSelectedId(row.original.id);
+                                        }}
+                                        className={
+                                            row.original.id === selectedId
+                                                ? `${style.selected_row}`
+                                                : `${style.table_row}`
+                                        }
+                                    >
+                                        {row.getAllCells().map((cell) => (
+                                            <Table.Td key={cell.id}>
+                                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                            </Table.Td>
+                                        ))}
+                                    </Table.Tr>
+                                </Menu.ContextMenu>
+                                <Menu.Dropdown>
+                                    <Menu.Item onClick={() => handleOpenFile(row.original.filepath)}>
+                                        Open File
+                                    </Menu.Item>
+                                    <Menu.Item leftSection={<FolderOpen size={16} />}
+                                        onClick={() => handleOpenInFileManager(row.original.filepath)}
+                                    >
+                                        Open in File Manager
+                                    </Menu.Item>
+                                    <Menu.Item leftSection={<Trash size={16} />} className={style.delete_menu_item}>
+                                        Delete
+                                    </Menu.Item>
+                                </Menu.Dropdown>
+                            </Menu>
+                        ))}
+                    </Table.Tbody>
+                </SelectableItemsTable>
+            </Box>
+
+            {/* 2. FDM-Style Bottom Details Pane */}
+            {selectedEntry && <DownloadDetailsPane entry={selectedEntry} />}
+        </Flex>
     );
 }

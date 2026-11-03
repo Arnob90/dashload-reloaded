@@ -10,13 +10,19 @@ import { getFilenameFromPath, calculateEta } from "../../code/utils.ts";
 export interface TableEntry {
     id: string;
     filename: string;
+    url: string;
     downloaded: number;
     total: number | null;
     speed: number | null;
     eta: number | null;
     status: DownloadState;
     downloadedPortion: number | null;
-    filepath: string
+    filepath: string;
+    headers: {
+        userAgent: string | null;
+        referrer: string | null;
+        cookies: string | null;
+    };
 }
 
 export function useTableEntries(): TableEntry[] | null {
@@ -70,8 +76,11 @@ export function useTableEntries(): TableEntry[] | null {
                     ? status.downloaded / status.total
                     : null;
 
+            const segmentHeaders = data.segments[0]?.headers;
+
             res.push({
                 id,
+                url: data.url,
                 filename: getFilenameFromPath(data.filepath),
                 downloaded: status.downloaded,
                 total: status.total,
@@ -79,7 +88,12 @@ export function useTableEntries(): TableEntry[] | null {
                 eta: calculateEta(status.total, status.downloaded, calculatedSpeed),
                 status: status.state,
                 downloadedPortion: portion,
-                filepath: data.filepath
+                filepath: data.filepath,
+                headers: {
+                    userAgent: segmentHeaders?.user_agent ?? null,
+                    referrer: segmentHeaders?.referrer ?? null,
+                    cookies: segmentHeaders?.cookies ?? null,
+                },
             });
         }
         res.sort((a, b) => a.id.localeCompare(b.id));
