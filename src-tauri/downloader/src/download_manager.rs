@@ -56,6 +56,8 @@ pub struct DownloadManager {
     /// Background runner tasks keyed by download ID, used to await termination on
     /// stop/retry before reusing a file path.
     pub runner_handles: DashMap<String, tokio::task::JoinHandle<()>>,
+    /// Per-download operation locks serializing stop/resume/retry transitions.
+    op_locks: DashMap<String, Arc<tokio::sync::Mutex<()>>>,
 }
 
 impl DownloadManager {
@@ -78,7 +80,16 @@ impl DownloadManager {
             poll_every_ms,
             client,
             runner_handles: DashMap::new(),
+            op_locks: DashMap::new(),
         }
+    }
+
+    /// Returns the per-download operation lock, creating it on first use.
+    fn op_lock(&self, id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        self.op_locks
+            .entry(id.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     /// Reconstructs a `DownloadManager` from a previously saved session snapshot of download data.
@@ -214,6 +225,8 @@ impl DownloadManager {
 
     /// Resumes a paused download from its saved state.
     pub async fn resume(&self, id: &str) -> Result<(), ManagerError> {
+        let lock = self.op_lock(id);
+        let _op_guard = lock.lock().await;
         let mut item_data = {
             self.download_items
                 .get(id)
@@ -247,6 +260,8 @@ impl DownloadManager {
         Ok(())
     }
     pub async fn retry(&self, id: &str) -> Result<String, ManagerError> {
+        let lock = self.op_lock(id);
+        let _op_guard = lock.lock().await;
         // Collect everything inside a block so the DashMap read guard is dropped
         // before `add_download` awaits and re-inserts into the same shard.
         let (state, url, filepath, number_of_segments, verifier, request_headers, retry_scheme) = {
@@ -294,6 +309,8 @@ impl DownloadManager {
     }
 
     pub async fn stop(&self, id: &str) -> Result<(), ManagerError> {
+        let lock = self.op_lock(id);
+        let _op_guard = lock.lock().await;
         // Clone the Arc so the DashMap guard is dropped before awaiting.
         let item = self
             .download_items
