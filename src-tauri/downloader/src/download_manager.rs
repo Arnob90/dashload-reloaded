@@ -235,17 +235,22 @@ impl DownloadManager {
         Ok(())
     }
     pub async fn retry(&self, id: &str) -> Result<String, ManagerError> {
-        let item = self
-            .download_items
-            .get(id)
-            .ok_or(ManagerError::IdDoesNotExist)?;
-
-        let url = item.url.clone();
-        let filepath = item.filepath.clone();
-        let number_of_segments = item.segments.len();
-        let verifier = item.verifier.clone();
-        let request_headers = item.segments[0].snapshot().headers;
-        let retry_scheme = item.retry_scheme.clone();
+        // Collect everything inside a block so the DashMap read guard is dropped
+        // before `add_download` awaits and re-inserts into the same shard.
+        let (url, filepath, number_of_segments, verifier, request_headers, retry_scheme) = {
+            let item = self
+                .download_items
+                .get(id)
+                .ok_or(ManagerError::IdDoesNotExist)?;
+            (
+                item.url.clone(),
+                item.filepath.clone(),
+                item.segments.len(),
+                item.verifier.clone(),
+                item.segments[0].snapshot().headers,
+                item.retry_scheme.clone(),
+            )
+        };
         self.add_download(
             DownloadOptions::new(url, filepath)
                 .with_segments(number_of_segments as u64)
