@@ -40,6 +40,8 @@ pub enum ManagerError {
     SegmentedNotSupported(String),
     #[error("Only paused (or already running) items can be resumed. Current state: {0:?}")]
     ResumeError(DownloadState),
+    #[error("Only stopped or failed items can be retried. Current state: {0:?}")]
+    RetryError(DownloadState),
 }
 
 /// The core manager for handling multiple concurrent downloads, supporting pause,
@@ -51,6 +53,9 @@ pub struct DownloadManager {
     pub client: reqwest::Client,
     /// Polling interval in milliseconds for status updates and progress tracking.
     pub poll_every_ms: u64,
+    /// Background runner tasks keyed by download ID, used to await termination on
+    /// stop/retry before reusing a file path.
+    pub runner_handles: DashMap<String, tokio::task::JoinHandle<()>>,
 }
 
 impl DownloadManager {
@@ -72,6 +77,7 @@ impl DownloadManager {
             download_items: DashMap::new(),
             poll_every_ms,
             client,
+            runner_handles: DashMap::new(),
         }
     }
 
@@ -92,10 +98,11 @@ impl DownloadManager {
             let item = DownloadItem::create_from_data(client.clone(), data, poll_every_ms)
                 .await
                 .map_err(|e| ManagerError::DownloadCreationError(e.to_string()))?;
-            manager.download_items.insert(id, item.clone());
-            tokio::spawn(async move {
+            manager.download_items.insert(id.clone(), item.clone());
+            let handle = tokio::spawn(async move {
                 let _ = item.start().await;
             });
+            manager.runner_handles.insert(id, handle);
         }
         Ok(manager)
     }
@@ -194,12 +201,12 @@ impl DownloadManager {
 
         self.download_items.insert(id.clone(), item.clone());
 
-        // 3. Spawn background runner task (.await added!)
+        // 3. Spawn background runner task
         let item_clone = item.clone();
-        tokio::spawn(async move {
-            eprintln!("Yes, I can read");
+        let handle = tokio::spawn(async move {
             let _ = item_clone.start().await;
         });
+        self.runner_handles.insert(id.clone(), handle);
         eprintln!("Download added with ID: {}", id);
 
         Ok(id)
@@ -220,6 +227,10 @@ impl DownloadManager {
         if !matches!(item_data.state, DownloadState::Paused) {
             return Err(ManagerError::ResumeError(item_data.state));
         }
+        // Ensure the previous runner has finished before starting a new one.
+        if let Some((_, old_handle)) = self.runner_handles.remove(id) {
+            let _ = old_handle.await;
+        }
         item_data.state = DownloadState::Running {
             download_speed: 0.0,
         };
@@ -228,21 +239,23 @@ impl DownloadManager {
                 .await
                 .map_err(|e| ManagerError::OperationFailed(e.to_string()))?;
         let item_clone = new_item.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let _ = item_clone.start().await;
         });
+        self.runner_handles.insert(id.to_string(), handle);
         self.download_items.insert(id.to_string(), new_item);
         Ok(())
     }
     pub async fn retry(&self, id: &str) -> Result<String, ManagerError> {
         // Collect everything inside a block so the DashMap read guard is dropped
         // before `add_download` awaits and re-inserts into the same shard.
-        let (url, filepath, number_of_segments, verifier, request_headers, retry_scheme) = {
+        let (state, url, filepath, number_of_segments, verifier, request_headers, retry_scheme) = {
             let item = self
                 .download_items
                 .get(id)
                 .ok_or(ManagerError::IdDoesNotExist)?;
             (
+                item.get_status().state,
                 item.url.clone(),
                 item.filepath.clone(),
                 item.segments.len(),
@@ -251,6 +264,14 @@ impl DownloadManager {
                 item.retry_scheme.clone(),
             )
         };
+        if !matches!(state, DownloadState::Stopped | DownloadState::Failed(_)) {
+            return Err(ManagerError::RetryError(state));
+        }
+        // Wait for the previous runner to fully terminate before reusing the
+        // same file path, otherwise its cleanup could unlink the new file.
+        if let Some((_, old_handle)) = self.runner_handles.remove(id) {
+            let _ = old_handle.await;
+        }
         self.add_download(
             DownloadOptions::new(url, filepath)
                 .with_segments(number_of_segments as u64)
@@ -273,11 +294,16 @@ impl DownloadManager {
     }
 
     pub async fn stop(&self, id: &str) -> Result<(), ManagerError> {
+        // Clone the Arc so the DashMap guard is dropped before awaiting.
         let item = self
             .download_items
             .get(id)
+            .map(|entry| entry.value().clone())
             .ok_or(ManagerError::IdDoesNotExist)?;
         item.stop().await;
+        if let Some((_, handle)) = self.runner_handles.remove(id) {
+            let _ = handle.await;
+        }
         Ok(())
     }
 

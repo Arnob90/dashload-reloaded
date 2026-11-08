@@ -192,6 +192,10 @@ export const ManagerErrorSchema = z.discriminatedUnion("kind", [
         kind: z.literal("ResumeError"),
         payload: DownloadStateSchema,
     }),
+    z.object({
+        kind: z.literal("RetryError"),
+        payload: DownloadStateSchema,
+    }),
 ]);
 
 export type ManagerError = z.infer<typeof ManagerErrorSchema>;
