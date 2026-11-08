@@ -356,6 +356,91 @@ async fn test_reconstruct_resume() {
         final_status.state,
         DownloadState::Completed { .. }
     ));
+    assert_eq!(
+        new_manager.runner_handles.len(),
+        1,
+        "resume after reconstruct should leave exactly one runner handle"
+    );
+
+    cleanup_file(&path).await;
+}
+
+/// Test: stopping a reconstructed, running item completes and cleans up its file.
+#[tokio::test]
+async fn stop_after_reconstruct_completes() {
+    let mock_server = setup_pause_resume_mock_server().await;
+    let client = reqwest::Client::new();
+    let manager = DownloadManager::new(client.clone(), 100);
+    let path = temp_filepath("wiremock_reconstruct_stop");
+
+    let id = manager
+        .add_download(
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
+        )
+        .await
+        .expect("Failed to add download");
+
+    // Capture a genuinely running item (the mock delays its body for 2s).
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    wait_for_state(
+        &manager,
+        &id,
+        DownloadState::Running {
+            download_speed: 0.0,
+        },
+        5_000,
+    )
+    .await;
+    let snapshot = manager.get_full_snapshot();
+
+    // Stop the original runner so both managers do not write the same file.
+    manager.pause(&id).expect("Failed to pause");
+    wait_for_state(&manager, &id, DownloadState::Paused, 10_000).await;
+
+    let new_manager = DownloadManager::reconstruct(client, 100, snapshot)
+        .await
+        .expect("Failed to reconstruct");
+    let new_id = new_manager
+        .get_all_items()
+        .keys()
+        .next()
+        .expect("No downloads after reconstruct")
+        .clone();
+    assert_eq!(
+        new_manager.runner_handles.len(),
+        1,
+        "reconstruct should register exactly one runner handle"
+    );
+
+    // The reconstructed item is already running (reconstruct auto-starts it).
+    wait_for_state(
+        &new_manager,
+        &new_id,
+        DownloadState::Running {
+            download_speed: 0.0,
+        },
+        5_000,
+    )
+    .await;
+
+    tokio::time::timeout(Duration::from_secs(15), new_manager.stop(&new_id))
+        .await
+        .expect("stop after reconstruct timed out")
+        .expect("stop after reconstruct failed");
+
+    assert!(matches!(
+        new_manager.get_item_status(&new_id).unwrap().state,
+        DownloadState::Stopped
+    ));
+    assert!(!path.exists(), "stopped reconstructed download should be removed");
+    assert!(
+        !new_manager.runner_handles.contains_key(&new_id),
+        "runner handle should be removed after stop"
+    );
 
     cleanup_file(&path).await;
 }
