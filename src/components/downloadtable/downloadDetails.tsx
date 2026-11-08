@@ -12,8 +12,10 @@ import {
     Tooltip,
     Code,
     ScrollArea,
+    Stack,
 } from "@mantine/core";
 import { bytesToMIB } from "../../code/utils.ts";
+import { useDownloadData } from "../../code/useDownloads.ts";
 import { TableEntry } from "./tableEntry.ts";
 import { Copy, Check, X, FolderOpen, Globe } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -35,6 +37,13 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
 
     const pct =
         entry.downloadedPortion != null ? Math.round(entry.downloadedPortion * 100) : 0;
+
+    const { data: downloadData } = useDownloadData();
+    const download = downloadData?.[entry.id];
+    const segments = download?.segments ?? [];
+    // A download is segmented when any segment carries explicit byte boundaries.
+    // If every `info` is null, the backend used a single non-ranged stream.
+    const isSegmented = segments.some((segment) => segment.info != null);
 
     const handleReveal = async () => {
         try {
@@ -64,6 +73,9 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                     <Tabs.List>
                         <Tabs.Tab value="overview" fz="xs" fw={500}>
                             Overview
+                        </Tabs.Tab>
+                        <Tabs.Tab value="segments" fz="xs" fw={500}>
+                            Segments
                         </Tabs.Tab>
                         <Tabs.Tab value="headers" fz="xs" fw={500}>
                             HTTP Context
@@ -168,7 +180,93 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                     </SimpleGrid>
                 </Tabs.Panel>
 
-                {/* TAB 2: HTTP HEADERS */}
+                {/* TAB 2: PER-SEGMENT PROGRESS */}
+                <Tabs.Panel value="segments">
+                    <ScrollArea h={160} offsetScrollbars>
+                        {segments.length === 0 ? (
+                            <Text size="xs" c="dimmed">
+                                No segment data available.
+                            </Text>
+                        ) : !isSegmented ? (
+                            <Box>
+                                <Text size="xs" c="dimmed" mb={6}>
+                                    This download is not segmented.
+                                </Text>
+                                <Progress
+                                    value={pct}
+                                    size="md"
+                                    radius="xl"
+                                    color={pct === 100 ? "teal" : "blue"}
+                                    mb={6}
+                                    styles={{
+                                        section: {
+                                            transition: "width 300ms ease-in-out",
+                                        },
+                                    }}
+                                />
+                                <Group justify="space-between">
+                                    <Text size="xs" c="dimmed">
+                                        {pct}% • {bytesToMIB(entry.downloaded).toFixed(1)} MiB of{" "}
+                                        {entry.total != null
+                                            ? `${bytesToMIB(entry.total).toFixed(1)} MiB`
+                                            : "Unknown"}
+                                    </Text>
+                                </Group>
+                            </Box>
+                        ) : (
+                            <Stack gap="xs">
+                                {segments.map((segment, index) => {
+                                    const size = segment.info
+                                        ? segment.info.end - segment.info.start + 1
+                                        : null;
+                                    const downloaded =
+                                        size != null
+                                            ? Math.min(segment.last_downloaded, size)
+                                            : segment.last_downloaded;
+                                    const segmentPct =
+                                        size != null && size > 0
+                                            ? Math.round((downloaded / size) * 100)
+                                            : 0;
+
+                                    return (
+                                        <Box key={index}>
+                                            <Group justify="space-between" mb={2}>
+                                                <Text size="xs" fw={500}>
+                                                    Segment {index + 1}
+                                                    {segment.info && (
+                                                        <Text span size="xs" c="dimmed" ml={6}>
+                                                            ({segment.info.start}-{segment.info.end})
+                                                        </Text>
+                                                    )}
+                                                </Text>
+                                                <Text size="xs" c="dimmed">
+                                                    {segmentPct}% •{" "}
+                                                    {bytesToMIB(downloaded).toFixed(1)}
+                                                    {size != null
+                                                        ? ` / ${bytesToMIB(size).toFixed(1)} MiB`
+                                                        : " MiB"}
+                                                </Text>
+                                            </Group>
+                                            <Progress
+                                                value={segmentPct}
+                                                size="sm"
+                                                radius="xl"
+                                                color={segmentPct === 100 ? "teal" : "blue"}
+                                                styles={{
+                                                    section: {
+                                                        transition: "width 300ms ease-in-out",
+                                                    },
+                                                }}
+                                            />
+                                        </Box>
+                                    );
+                                })}
+                            </Stack>
+                        )}
+                    </ScrollArea>
+                </Tabs.Panel>
+
+                {/* TAB 3: HTTP HEADERS */}
                 <Tabs.Panel value="headers">
                     <ScrollArea h={160} offsetScrollbars>
                         <SimpleGrid cols={1} spacing="xs">
