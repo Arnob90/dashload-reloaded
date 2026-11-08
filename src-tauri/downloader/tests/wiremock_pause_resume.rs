@@ -1,4 +1,5 @@
 //! WireMock tests for pause/resume lifecycle.
+use dashload_downloader::download_options::DownloadOptions;
 
 use dashload_downloader::{
     download_manager::DownloadManager,
@@ -115,12 +116,11 @@ async fn test_pause_resume_single_cycle() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -177,12 +177,11 @@ async fn test_pause_resume_multiple_cycles() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -244,12 +243,11 @@ async fn test_stop_deletes_file() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -294,12 +292,11 @@ async fn test_reconstruct_resume() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");

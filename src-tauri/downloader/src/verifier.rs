@@ -55,7 +55,7 @@ impl Verifier {
 }
 
 /// Optional wrapper around `Verifier`, allowing downloads without checksum verification.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct VerifierMaybe {
     verifier: Option<Verifier>,
 }

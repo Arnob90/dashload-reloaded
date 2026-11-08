@@ -1,4 +1,5 @@
 use dashload_downloader::download_manager::DownloadManager;
+use dashload_downloader::download_options::DownloadOptions;
 use dashload_downloader::download_status::DownloadState;
 use dashload_downloader::request_headers::RequestHeaders;
 use dashload_downloader::retry_scheme::RetryScheme;
@@ -53,12 +54,11 @@ async fn test_download() {
     // 5. Start download with 4 segments, verifier, and request headers
     let id = download_manager
         .add_download(
-            download_link.to_string(),
-            filepath.clone(),
-            4,
-            verifier,
-            request_headers, // 👈 Passed RequestHeaders here
-            RetryScheme::default(),
+            DownloadOptions::new(download_link.to_string(), filepath.clone())
+                .with_segments(4)
+                .with_verifier(verifier)
+                .with_headers(request_headers) // 👈 Passed RequestHeaders here
+                .with_retry(RetryScheme::default()),
         )
         .await
         .unwrap();

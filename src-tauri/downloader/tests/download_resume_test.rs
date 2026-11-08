@@ -1,4 +1,5 @@
 use dashload_downloader::download_manager::DownloadManager;
+use dashload_downloader::download_options::DownloadOptions;
 use dashload_downloader::download_status::DownloadState;
 use dashload_downloader::request_headers::RequestHeaders;
 use dashload_downloader::retry_scheme::RetryScheme;
@@ -37,12 +38,11 @@ async fn test_segmented_download_progress() {
     // Pass VerifierMaybe::none() and default request headers
     let id = manager
         .add_download(
-            TEST_URL.to_string(),
-            path.clone(),
-            4,
-            VerifierMaybe::none(),
-            default_test_headers(), // 👈 5th argument added
-            RetryScheme::default(),
+            DownloadOptions::new(TEST_URL.to_string(), path.clone())
+                .with_segments(4)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers()) // 👈 5th argument added
+                .with_retry(RetryScheme::default()),
         )
         .await
         .unwrap();
@@ -78,12 +78,11 @@ async fn test_pause_and_resume_lifecycle() {
 
     let id = manager
         .add_download(
-            TEST_URL.to_string(),
-            path.clone(),
-            4,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            RetryScheme::default(),
+            DownloadOptions::new(TEST_URL.to_string(), path.clone())
+                .with_segments(4)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(RetryScheme::default()),
         )
         .await
         .unwrap();
@@ -146,12 +145,11 @@ async fn test_single_stream_download() {
     // 1 segment (N = 1) with VerifierMaybe::none() and request headers
     let id = manager
         .add_download(
-            TEST_URL.to_string(),
-            path.clone(),
-            1,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            RetryScheme::default(),
+            DownloadOptions::new(TEST_URL.to_string(), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(RetryScheme::default()),
         )
         .await
         .unwrap();

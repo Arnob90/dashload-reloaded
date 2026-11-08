@@ -1,4 +1,5 @@
 //! WireMock tests for session persistence (save/load).
+use dashload_downloader::download_options::DownloadOptions;
 
 use dashload_downloader::{
     download_data::DownloadData,
@@ -27,12 +28,11 @@ async fn test_save_session_creates_valid_json() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -92,12 +92,11 @@ async fn test_reconstruct_resumes_from_snapshot() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -188,12 +187,11 @@ async fn test_save_session_preserves_verifier() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            verifier,
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(verifier)
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -244,12 +242,11 @@ async fn test_save_session_preserves_headers() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            VerifierMaybe::none(),
-            custom_headers.clone(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(custom_headers.clone())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -296,24 +293,28 @@ async fn test_reconstruct_multiple_downloads() {
 
     let id1 = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path1.clone(),
-            TEST_SEGMENTS,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(
+                format!("{}/test-file.bin", mock_server.uri()),
+                path1.clone(),
+            )
+            .with_segments(TEST_SEGMENTS)
+            .with_verifier(VerifierMaybe::none())
+            .with_headers(default_test_headers())
+            .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download 1");
 
     let id2 = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path2.clone(),
-            TEST_SEGMENTS,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(
+                format!("{}/test-file.bin", mock_server.uri()),
+                path2.clone(),
+            )
+            .with_segments(TEST_SEGMENTS)
+            .with_verifier(VerifierMaybe::none())
+            .with_headers(default_test_headers())
+            .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download 2");
@@ -375,12 +376,11 @@ async fn test_deserialize_datas_roundtrip() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            create_sha256_verifier(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(create_sha256_verifier())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -463,4 +463,3 @@ async fn wait_for_state(
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
-

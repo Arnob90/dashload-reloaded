@@ -1,6 +1,7 @@
 use crate::download_data::DownloadData;
 use crate::download_data_factory::DownloadDataFactory;
 use crate::download_item::DownloadItem;
+use crate::download_options::DownloadOptions;
 use crate::download_status::DownloadState;
 use crate::download_status::DownloadStatus;
 use crate::info_getters;
@@ -37,6 +38,8 @@ pub enum ManagerError {
     InvalidHeaders(String),
     #[error("Segmented download not supported by server. Reason: {0}")]
     SegmentedNotSupported(String),
+    #[error("Only paused (or already running) items can be resumed. Current state: {0:?}")]
+    ResumeError(DownloadState),
 }
 
 /// The core manager for handling multiple concurrent downloads, supporting pause,
@@ -148,30 +151,28 @@ impl DownloadManager {
             retry_scheme,
         ))
     }
+
     /// Adds a new download (handles both single-segment and multi-segment downloads).
     ///
     /// Fetches the file size first to determine if multi-segment chunking can be used,
-    /// initializes the download item, generates a unique ID, and starts it in a background task.
+    /// initializes the download item, generates a unique ID (unless one is supplied via
+    /// [`DownloadOptions::id`]), and starts it in a background task.
     ///
-    /// # Arguments
-    /// * `url` - The target download URL.
-    /// * `filepath` - The local destination file path.
-    /// * `number_of_segments` - The number of concurrent chunks/segments to split the download into.
-    /// * `verifier` - Optional checksum verifier (`VerifierMaybe`).
-    /// * `request_headers` - Custom HTTP headers (`RequestHeaders`) such as User-Agent or cookies.
     /// # Errors
-    /// - ManagerError::SegmentedNotSupported if the server does not support segmented downloads.
-    ///
-    /// Providing a fallback is user responsibility (e.g., retrying with a single segment).
-    pub async fn add_download(
-        &self,
-        url: String,
-        filepath: PathBuf,
-        number_of_segments: u64,
-        verifier: VerifierMaybe,
-        request_headers: RequestHeaders,
-        retry_scheme: RetryScheme,
-    ) -> Result<String, ManagerError> {
+    /// - `ManagerError::SegmentedNotSupported` if the server does not support segmented
+    ///   downloads. Providing a fallback is the caller's responsibility (e.g. retrying
+    ///   with a single segment).
+    pub async fn add_download(&self, opts: DownloadOptions) -> Result<String, ManagerError> {
+        let DownloadOptions {
+            url,
+            filepath,
+            number_of_segments,
+            verifier,
+            request_headers,
+            retry_scheme,
+            id,
+        } = opts;
+        let id = id.unwrap_or_else(|| Uuid::new_v4().to_string());
         println!(
             "Adding download: {} -> {:?} ({} segments)",
             url, filepath, number_of_segments
@@ -191,7 +192,6 @@ impl DownloadManager {
             .await
             .map_err(|e| ManagerError::DownloadCreationError(e.to_string()))?;
 
-        let id = Uuid::new_v4().as_simple().to_string();
         self.download_items.insert(id.clone(), item.clone());
 
         // 3. Spawn background runner task (.await added!)
@@ -213,6 +213,13 @@ impl DownloadManager {
                 .ok_or(ManagerError::IdDoesNotExist)?
                 .snapshot_data()
         };
+        if matches!(item_data.state, DownloadState::Running { .. }) {
+            // Already running (e.g. reconstructed and auto-started): resuming is a no-op.
+            return Ok(());
+        }
+        if !matches!(item_data.state, DownloadState::Paused) {
+            return Err(ManagerError::ResumeError(item_data.state));
+        }
         item_data.state = DownloadState::Running {
             download_speed: 0.0,
         };
@@ -227,7 +234,28 @@ impl DownloadManager {
         self.download_items.insert(id.to_string(), new_item);
         Ok(())
     }
+    pub async fn retry(&self, id: &str) -> Result<String, ManagerError> {
+        let item = self
+            .download_items
+            .get(id)
+            .ok_or(ManagerError::IdDoesNotExist)?;
 
+        let url = item.url.clone();
+        let filepath = item.filepath.clone();
+        let number_of_segments = item.segments.len();
+        let verifier = item.verifier.clone();
+        let request_headers = item.segments[0].snapshot().headers;
+        let retry_scheme = item.retry_scheme.clone();
+        self.add_download(
+            DownloadOptions::new(url, filepath)
+                .with_segments(number_of_segments as u64)
+                .with_verifier(verifier)
+                .with_headers(request_headers)
+                .with_retry(retry_scheme)
+                .with_id(id),
+        )
+        .await
+    }
     /// Pauses an active download by its unique ID.
     pub fn pause(&self, id: &str) -> Result<(), ManagerError> {
         let item = self
@@ -236,6 +264,15 @@ impl DownloadManager {
             .ok_or(ManagerError::IdDoesNotExist)?;
 
         item.pause();
+        Ok(())
+    }
+
+    pub async fn stop(&self, id: &str) -> Result<(), ManagerError> {
+        let item = self
+            .download_items
+            .get(id)
+            .ok_or(ManagerError::IdDoesNotExist)?;
+        item.stop().await;
         Ok(())
     }
 

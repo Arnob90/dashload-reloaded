@@ -1,4 +1,5 @@
 //! WireMock tests for error handling scenarios.
+use dashload_downloader::download_options::DownloadOptions;
 
 use dashload_downloader::{
     download_manager::DownloadManager, download_manager::ManagerError,
@@ -31,12 +32,11 @@ async fn test_server_returns_404() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            no_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(no_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -62,12 +62,11 @@ async fn test_server_returns_500() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            no_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(no_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -101,12 +100,11 @@ async fn test_network_timeout() {
     // Port 1 is not listening on localhost -> connect refusal -> NetworkError.
     let id = manager
         .add_download(
-            "http://127.0.0.1:1/test-file.bin".to_string(),
-            path.clone(),
-            1,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            no_retry_scheme(),
+            DownloadOptions::new("http://127.0.0.1:1/test-file.bin".to_string(), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(no_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -135,12 +133,11 @@ async fn test_disk_write_error() {
 
     let result = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            invalid_path,
-            1,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            no_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), invalid_path)
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(no_retry_scheme()),
         )
         .await;
 
@@ -180,12 +177,11 @@ async fn test_range_not_satisfiable() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            no_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(no_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -240,9 +236,7 @@ async fn test_connection_reset() {
     // match a GET without a Range matcher.
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/test-file.bin"))
-        .respond_with(
-            wiremock::ResponseTemplate::new(206).set_delay(Duration::from_secs(10)),
-        )
+        .respond_with(wiremock::ResponseTemplate::new(206).set_delay(Duration::from_secs(10)))
         .mount(&mock_server)
         .await;
 
@@ -256,12 +250,11 @@ async fn test_connection_reset() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1, // 1 segment: avoids multi-segment math mismatches!
-            VerifierMaybe::none(),
-            default_test_headers(),
-            no_retry_scheme(), // max_attempts: 0 -> fails immediately
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1) // 1 segment: avoids multi-segment math mismatches!
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(no_retry_scheme()), // max_attempts: 0 -> fails immediately
         )
         .await
         .expect("Failed to add download");

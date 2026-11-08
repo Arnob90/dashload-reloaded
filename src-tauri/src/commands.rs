@@ -1,12 +1,11 @@
 use crate::api_error::ApiError;
 use downloader::download_data::DownloadData;
 use downloader::download_manager::{DownloadManager, ManagerError};
+use downloader::download_options::DownloadOptions;
 use downloader::download_status::DownloadStatus;
 use downloader::get_download_info::{get_download_info, DownloadInfo, DownloadInfoGetError};
 use downloader::request_headers::RequestHeaders;
-use downloader::retry_scheme::RetryScheme;
 use downloader::serialization_error::DataSerializationError;
-use downloader::verifier::VerifierMaybe;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::ipc::Invoke;
@@ -33,24 +32,9 @@ pub struct AppState {
 #[tauri::command]
 async fn add_download(
     state: State<'_, AppState>,
-    url: &str,
-    filepath: &str,
-    number_of_segments: u64,
-    verifier: VerifierMaybe,
-    request_headers: RequestHeaders,
-    retry_scheme: RetryScheme,
+    opts: DownloadOptions,
 ) -> Result<String, ApiError<ManagerError>> {
-    Ok(state
-        .download_manager
-        .add_download(
-            url.to_string(),
-            filepath.into(),
-            number_of_segments,
-            verifier,
-            request_headers,
-            retry_scheme,
-        )
-        .await?)
+    Ok(state.download_manager.add_download(opts).await?)
 }
 
 #[tauri::command]

@@ -2,6 +2,7 @@ pub mod download_data;
 pub mod download_data_factory;
 pub mod download_item;
 pub mod download_manager;
+pub mod download_options;
 pub mod download_run_error;
 pub mod download_status;
 pub mod external_download_request;

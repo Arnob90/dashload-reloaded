@@ -1,4 +1,5 @@
 //! WireMock tests for single-stream (non-segmented) downloads.
+use dashload_downloader::download_options::DownloadOptions;
 
 use dashload_downloader::{
     download_manager::DownloadManager,
@@ -26,12 +27,11 @@ async fn test_single_stream_download_completes() {
     // Request 4 segments but server doesn't support ranges -> should fail
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await;
     let id_err = id.expect_err("Expected error due to unsupported segmented download");
@@ -55,12 +55,11 @@ async fn test_single_stream_with_verifier() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1, // Explicitly request 1 segment
-            create_sha256_verifier(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1) // Explicitly request 1 segment
+                .with_verifier(create_sha256_verifier())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -92,12 +91,11 @@ async fn test_single_stream_sha512_verifier() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1,
-            verifier,
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(verifier)
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
@@ -121,12 +119,11 @@ async fn test_single_stream_verification_fails() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            1,
-            create_wrong_verifier(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(create_wrong_verifier())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");

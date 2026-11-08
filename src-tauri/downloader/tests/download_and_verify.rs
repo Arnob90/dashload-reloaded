@@ -1,4 +1,5 @@
 use dashload_downloader::download_manager::DownloadManager;
+use dashload_downloader::download_options::DownloadOptions;
 use dashload_downloader::download_status::DownloadState;
 use dashload_downloader::request_headers::RequestHeaders;
 use dashload_downloader::retry_scheme::RetryScheme;
@@ -57,12 +58,11 @@ async fn test_alpine_download_and_verify_sha256() {
     // 4. Add download with 4 segments, verifier, and custom headers
     let id = download_manager
         .add_download(
-            download_url.to_string(),
-            target_path.clone(),
-            4,
-            verifier,
-            request_headers, // 👈 Passed request headers here
-            RetryScheme::default(),
+            DownloadOptions::new(download_url.to_string(), target_path.clone())
+                .with_segments(4)
+                .with_verifier(verifier)
+                .with_headers(request_headers) // 👈 Passed request headers here
+                .with_retry(RetryScheme::default()),
         )
         .await
         .expect("Failed to add download");

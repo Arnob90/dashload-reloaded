@@ -188,6 +188,10 @@ export const ManagerErrorSchema = z.discriminatedUnion("kind", [
         kind: z.literal("SegmentedNotSupported"),
         payload: z.string(),
     }),
+    z.object({
+        kind: z.literal("ResumeError"),
+        payload: DownloadStateSchema,
+    }),
 ]);
 
 export type ManagerError = z.infer<typeof ManagerErrorSchema>;
@@ -254,6 +258,21 @@ export const VerifierMaybeSchema = z.object({
     verifier: VerifierSchema.nullable(),
 });
 export type VerifierMaybe = z.infer<typeof VerifierMaybeSchema>;
+
+// ============================================================================
+// 5. Download creation options
+// ============================================================================
+/** Rust: DownloadOptions */
+export const DownloadOptionsSchema = z.object({
+    url: z.string(),
+    filepath: z.string(),
+    number_of_segments: z.number(),
+    verifier: VerifierMaybeSchema,
+    request_headers: RequestHeadersSchema,
+    retry_scheme: RetrySchemeSchema,
+    id: z.string().nullable(),
+});
+export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>;
 
 export const DownloadDataSchema = z.object({
     url: z.string(),

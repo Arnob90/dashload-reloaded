@@ -127,6 +127,11 @@ impl DownloadItem {
             let _ = tokio::fs::remove_file(&self.filepath).await;
         }
         results?;
+        if self.segment_command_sender.borrow().clone() == SegmentCommand::Stop {
+            fs::remove_file(self.filepath.clone()).await.map_err(|e| {
+                DownloadRunError::DiskError(format!("Failed to delete file after stop: {}", e))
+            })?;
+        }
         let verify_clone = self.verifier.clone();
         let filepath_clone = self.filepath.clone();
         let verified = tokio::task::spawn_blocking(move || verify_clone.verify(&filepath_clone))

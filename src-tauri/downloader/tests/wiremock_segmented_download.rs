@@ -1,15 +1,16 @@
 //! WireMock tests for segmented (multi-chunk) downloads.
+use dashload_downloader::download_options::DownloadOptions;
 
-use wiremock::MockServer;
 use dashload_downloader::{
     download_manager::DownloadManager,
-    download_status::{DownloadState, DownloadStatus},
     download_run_error::DownloadRunError,
+    download_status::{DownloadState, DownloadStatus},
     request_headers::RequestHeaders,
-    verifier::{VerifierMaybe, HashAlgo},
+    verifier::{HashAlgo, VerifierMaybe},
 };
 use std::path::PathBuf;
 use std::time::Duration;
+use wiremock::MockServer;
 
 mod wiremock_helpers;
 use wiremock_helpers::*;
@@ -24,25 +25,28 @@ async fn test_segmented_download_completes() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            VerifierMaybe::none(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
 
     // Poll for completion
-    let status = poll_until_completed(&manager, &id, 10_000).await.expect("Download timed out");
+    let status = poll_until_completed(&manager, &id, 10_000)
+        .await
+        .expect("Download timed out");
 
     assert_eq!(status.downloaded, TEST_FILE_SIZE);
     assert_eq!(status.total, Some(TEST_FILE_SIZE));
     assert!(matches!(status.state, DownloadState::Completed { size } if size == TEST_FILE_SIZE));
 
     // Verify file content
-    let content = tokio::fs::read(&path).await.expect("Failed to read downloaded file");
+    let content = tokio::fs::read(&path)
+        .await
+        .expect("Failed to read downloaded file");
     assert_eq!(content.len(), TEST_FILE_SIZE as usize);
     assert_eq!(content, test_file_content());
 
@@ -59,22 +63,25 @@ async fn test_segmented_download_with_verifier() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            create_sha256_verifier(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(create_sha256_verifier())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
 
-    let status = poll_until_completed(&manager, &id, 10_000).await.expect("Download timed out");
+    let status = poll_until_completed(&manager, &id, 10_000)
+        .await
+        .expect("Download timed out");
 
     assert!(matches!(status.state, DownloadState::Completed { size } if size == TEST_FILE_SIZE));
 
     // Verify file content
-    let content = tokio::fs::read(&path).await.expect("Failed to read downloaded file");
+    let content = tokio::fs::read(&path)
+        .await
+        .expect("Failed to read downloaded file");
     assert_eq!(content, test_file_content());
 
     cleanup_file(&path).await;
@@ -90,20 +97,23 @@ async fn test_segmented_download_verification_fails() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            create_wrong_verifier(),
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(create_wrong_verifier())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
 
-    let status = poll_until_completed(&manager, &id, 10_000).await.expect("Download timed out");
+    let status = poll_until_completed(&manager, &id, 10_000)
+        .await
+        .expect("Download timed out");
 
     // Should fail verification
-    assert!(matches!(status.state, DownloadState::Failed(e) if matches!(e, dashload_downloader::download_run_error::DownloadRunError::VerifyError)));
+    assert!(
+        matches!(status.state, DownloadState::Failed(e) if matches!(e, dashload_downloader::download_run_error::DownloadRunError::VerifyError))
+    );
 
     cleanup_file(&path).await;
 }
@@ -120,17 +130,18 @@ async fn test_segmented_download_sha512_verifier() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            verifier,
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(verifier)
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
 
-    let status = poll_until_completed(&manager, &id, 10_000).await.expect("Download timed out");
+    let status = poll_until_completed(&manager, &id, 10_000)
+        .await
+        .expect("Download timed out");
 
     assert!(matches!(status.state, DownloadState::Completed { size } if size == TEST_FILE_SIZE));
 
@@ -149,17 +160,18 @@ async fn test_segmented_download_md5_verifier() {
 
     let id = manager
         .add_download(
-            format!("{}/test-file.bin", mock_server.uri()),
-            path.clone(),
-            TEST_SEGMENTS,
-            verifier,
-            default_test_headers(),
-            default_retry_scheme(),
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(TEST_SEGMENTS)
+                .with_verifier(verifier)
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
         )
         .await
         .expect("Failed to add download");
 
-    let status = poll_until_completed(&manager, &id, 10_000).await.expect("Download timed out");
+    let status = poll_until_completed(&manager, &id, 10_000)
+        .await
+        .expect("Download timed out");
 
     assert!(matches!(status.state, DownloadState::Completed { size } if size == TEST_FILE_SIZE));
 

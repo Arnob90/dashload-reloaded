@@ -1,24 +1,13 @@
 import { invoke } from "@tauri-apps/api/core"
 import z from "zod"
-import { DownloadDataMap, DownloadDataMapSchema, DownloadInfo, DownloadInfoSchema, DownloadStatusMapSchema, DownloadStatusMap, ManagerApiErrorSchema, DownloadInfoGetApiErrorSchema, VerifierMaybe, RetryScheme, RequestHeaders, DataSerializationApiErrorSchema, DownloadStatusSchema } from "./typesOfBackend"
+import { DownloadDataMap, DownloadDataMapSchema, DownloadInfo, DownloadInfoSchema, DownloadStatusMapSchema, DownloadStatusMap, ManagerApiErrorSchema, DownloadInfoGetApiErrorSchema, RequestHeaders, DataSerializationApiErrorSchema, DownloadStatusSchema, DownloadOptions, DownloadOptionsSchema } from "./typesOfBackend"
 import type { DownloadStatus } from "./typesOfBackend"
-import { DEFAULT_REQUEST_HEADERS, DEFAULT_RETRY_SCHEME } from "./defaults"
-export async function addDownload(
-    url: string,
-    filepath: string,
-    numberOfSegments: number,
-    verifier: VerifierMaybe,
-    requestHeaders?: RequestHeaders,
-    retryScheme?: RetryScheme
-): Promise<string> {
+import { DEFAULT_REQUEST_HEADERS } from "./defaults"
+export async function addDownload(opts: DownloadOptions): Promise<string> {
     try {
+        const parsed = await DownloadOptionsSchema.parseAsync(opts)
         const idMaybe = await invoke("add_download", {
-            url: url,
-            filepath: filepath,
-            numberOfSegments: numberOfSegments,
-            verifier: verifier,
-            requestHeaders: requestHeaders ?? DEFAULT_REQUEST_HEADERS,
-            retryScheme: retryScheme ?? DEFAULT_RETRY_SCHEME
+            opts: parsed,
         })
         const id = await z.string().parseAsync(idMaybe)
         return id
