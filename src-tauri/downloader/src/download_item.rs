@@ -16,10 +16,11 @@ pub enum CreateOpts {
 }
 
 /// Verification state of the downloaded file.
+#[derive(Clone)]
 pub enum VerificationState {
     Verifying,
     Verified,
-    VerifyFailed,
+    VerifyFailed(FailureDetails),
 }
 
 /// Represents an individual download item being managed, containing multiple segments,
@@ -129,29 +130,23 @@ impl DownloadItem {
         results?;
         let verify_clone = self.verifier.clone();
         let filepath_clone = self.filepath.clone();
-        let verified = tokio::task::spawn_blocking(move || verify_clone.verify(&filepath_clone))
+        let verified = tokio::task::spawn_blocking(move || verify_clone.verify_with_hash(&filepath_clone))
             .await
             .map_err(|e| DownloadRunError::DiskError {
                 message: format!("Verification task panicked {}", e),
                 path: None,
-            })?
-            .map_err(|e| DownloadRunError::DiskError {
-                message: format!("IO error during validation {}", e),
-                path: None,
             })?;
-        if !verified {
-            let expected = self
-                .verifier
-                .expected_hash()
-                .unwrap_or("unknown")
-                .to_string();
-            let _ = self
-                .verify_result_sender
-                .send(VerificationState::VerifyFailed);
-            return Err(DownloadRunError::VerifyError {
-                expected,
-                actual: "checksum mismatch".to_string(),
-            });
+        match verified {
+            Ok(true) => {}
+            Ok(false) => unreachable!("verify_with_hash returns Err on mismatch"),
+            Err((expected, actual)) => {
+                let err = DownloadRunError::VerifyError { expected, actual };
+                let details = FailureDetails::new(err.clone());
+                let _ = self
+                    .verify_result_sender
+                    .send(VerificationState::VerifyFailed(details));
+                return Err(err);
+            }
         }
         let _ = self.verify_result_sender.send(VerificationState::Verified);
         Ok(())
@@ -241,18 +236,10 @@ impl DownloadItem {
             }
         };
         if let DownloadState::Completed { .. } = overall_state {
-            overall_state = match *self.verify_result_receiver.borrow() {
+            overall_state = match &*self.verify_result_receiver.borrow() {
                 VerificationState::Verifying => DownloadState::Verifying,
-                VerificationState::VerifyFailed => {
-                    let expected = self
-                        .verifier
-                        .expected_hash()
-                        .unwrap_or("unknown")
-                        .to_string();
-                    DownloadState::Failed(FailureDetails::new(DownloadRunError::VerifyError {
-                        expected,
-                        actual: "unknown".to_string(),
-                    }))
+                VerificationState::VerifyFailed(details) => {
+                    DownloadState::Failed(details.clone())
                 }
                 VerificationState::Verified => overall_state,
             }

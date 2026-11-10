@@ -112,7 +112,7 @@ async fn test_segmented_download_verification_fails() {
 
     // Should fail verification
     assert!(
-        matches!(status.state, DownloadState::Failed(e) if matches!(e, dashload_downloader::download_run_error::DownloadRunError::VerifyError))
+        matches!(status.state, DownloadState::Failed(f) if matches!(f.error, DownloadRunError::VerifyError { .. }))
     );
 
     cleanup_file(&path).await;

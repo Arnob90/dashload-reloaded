@@ -13,6 +13,11 @@ pub enum VerifyError {
     #[serde(serialize_with = "serialize_io_error")]
     #[error("There has been error in IO")]
     IOError(#[from] std::io::Error),
+    #[error("Hash mismatch: expected {expected}, got {actual}")]
+    HashMismatch {
+        expected: String,
+        actual: String,
+    },
 }
 
 /// Supported hash algorithms for integrity verification.
@@ -33,7 +38,8 @@ struct Verifier {
 impl Verifier {
     /// Verifies the file at `filepath` against the expected hash.
     /// Reads the file in 8KB chunks to compute the hash incrementally.
-    pub fn verify(&self, filepath: &Path) -> Result<bool, VerifyError> {
+    /// Returns (expected_hash, actual_hash) where actual_hash is the computed hash.
+    pub fn verify(&self, filepath: &Path) -> Result<(String, String), VerifyError> {
         let mut hasher: Box<dyn DynDigest> = match self.algo {
             HashAlgo::Sha256 => Box::new(sha2::Sha256::new()),
             HashAlgo::Sha512 => Box::new(sha2::Sha512::new()),
@@ -50,7 +56,14 @@ impl Verifier {
         }
         let res = hasher.finalize_reset();
         let computed_hex = hex::encode(res);
-        Ok(computed_hex == self.to_match_hash)
+        if computed_hex == self.to_match_hash {
+            Ok((self.to_match_hash.clone(), computed_hex))
+        } else {
+            Err(VerifyError::HashMismatch {
+                expected: self.to_match_hash.clone(),
+                actual: computed_hex,
+            })
+        }
     }
 }
 
@@ -77,9 +90,24 @@ impl VerifierMaybe {
     }
 
     /// Verifies the file if a verifier is present; otherwise returns `Ok(true)`.
+    /// Returns Ok(true) if no verifier or verification passed, Ok(false) if hash mismatched.
     pub fn verify(&self, filepath: &Path) -> Result<bool, VerifyError> {
         if let Some(verifier) = &self.verifier {
-            verifier.verify(filepath)
+            let (_expected, _actual) = verifier.verify(filepath)?;
+            Ok(true)
+        } else {
+            Ok(true)
+        }
+    }
+
+    /// Verifies the file and returns the actual computed hash on failure.
+    pub fn verify_with_hash(&self, filepath: &Path) -> Result<bool, (String, String)> {
+        if let Some(verifier) = &self.verifier {
+            match verifier.verify(filepath) {
+                Ok((_expected, _actual)) => Ok(true),
+                Err(VerifyError::HashMismatch { expected, actual }) => Err((expected, actual)),
+                Err(e) => panic!("IO error during verification: {}", e),
+            }
         } else {
             Ok(true)
         }
