@@ -324,6 +324,14 @@ impl DownloadManager {
         Ok(())
     }
 
+    /// Deletes a download: stops it, removes it from the manager, and cleans up
+    /// its background runner task.
+    pub async fn delete(&self, id: &str) -> Result<(), ManagerError> {
+        self.stop(id).await?;
+        self.download_items.remove(id);
+        Ok(())
+    }
+
     /// Gets instantaneous status for a single download item (no async needed).
     pub fn get_item_status(&self, id: &str) -> Result<DownloadStatus, ManagerError> {
         let item = self

@@ -13,6 +13,7 @@ import {
     getData,
     getItemStatus,
     saveSession,
+    deleteDownload,
 } from "./apiCommunicate.ts"; // Your invoke file
 import { getConfigFile } from "./defaults.ts";
 import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, RequestHeaders, DownloadOptions } from "./typesOfBackend";
@@ -157,6 +158,21 @@ export function useGetConfigFile() {
 export function useSaveSession() {
     return useMutation({
         mutationFn: saveSession,
+    });
+}
+
+/**
+ * Deletes a download by ID (stops it, removes it from the manager, and
+ * invalidates the status query cache).
+ */
+export function useDeleteDownload() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (id: string) => deleteDownload(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: downloadKeys.all });
+        },
     });
 }
 // Base error guaranteed across ALL Tauri commands

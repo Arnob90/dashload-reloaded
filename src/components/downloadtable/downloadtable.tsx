@@ -16,6 +16,7 @@ import { SelectableItemsTable } from "../selectabletable/selectableItemsTable.ts
 import {
     usePauseDownload,
     useResumeDownload,
+    useDeleteDownload,
 } from "../../code/useDownloads.ts";
 import { notifications } from "@mantine/notifications";
 import { ChevronRight, FolderOpen, Pause, Trash, FileArchive, FileCode, File as DefaultFile } from "lucide-react";
@@ -48,6 +49,7 @@ export function DownloadTable() {
     const selectedEntry = entries?.find((e) => e.id === selectedId);
     const { mutate: pauseDownload } = usePauseDownload();
     const { mutate: resumeDownload } = useResumeDownload();
+    const { mutate: deleteDownload } = useDeleteDownload();
     const [sorting, setSorting] = useState<SortingState>([])
     const handleOpenInFileManager = (path: string) => {
         revealItemInDir(path)
@@ -79,6 +81,20 @@ export function DownloadTable() {
             },
         });
     }, [resumeDownload]);
+    const handleDelete = useCallback((id: string) => {
+        deleteDownload(id, {
+            onError: (err) => {
+                notifications.show({
+                    title: "Failed to Delete",
+                    message: err.message,
+                    color: "red",
+                });
+            },
+            onSuccess: () => {
+                setSelectedId(null);
+            },
+        });
+    }, [deleteDownload]);
     const columns = useMemo(
         () => columnHelper.columns([
             columnHelper.display({
@@ -298,7 +314,7 @@ export function DownloadTable() {
                                     >
                                         Open in File Manager
                                     </Menu.Item>
-                                    <Menu.Item leftSection={<Trash size={16} />} className={style.delete_menu_item}>
+                                    <Menu.Item leftSection={<Trash size={16} />} className={style.delete_menu_item} onClick={() => handleDelete(row.original.id)}>
                                         Delete
                                     </Menu.Item>
                                 </Menu.Dropdown>

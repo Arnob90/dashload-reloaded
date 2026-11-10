@@ -104,3 +104,14 @@ export async function saveSession(): Promise<void> {
         throw DataSerializationApiErrorSchema.parse(err)
     }
 }
+
+export async function deleteDownload(id: string): Promise<void> {
+    try {
+        await invoke("delete_download", {
+            id: id,
+        })
+    }
+    catch (err) {
+        throw ManagerApiErrorSchema.parse(err)
+    }
+}
