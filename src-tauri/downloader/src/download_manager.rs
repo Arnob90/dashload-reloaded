@@ -325,9 +325,19 @@ impl DownloadManager {
     }
 
     /// Deletes a download: stops it, removes it from the manager, and cleans up
-    /// its background runner task.
+    /// its background runner task under the operation lock to prevent concurrent races.
     pub async fn delete(&self, id: &str) -> Result<(), ManagerError> {
-        self.stop(id).await?;
+        let lock = self.op_lock(id);
+        let _op_guard = lock.lock().await;
+        let item = self
+            .download_items
+            .get(id)
+            .map(|entry| entry.value().clone())
+            .ok_or(ManagerError::IdDoesNotExist)?;
+        item.stop().await;
+        if let Some((_, handle)) = self.runner_handles.remove(id) {
+            let _ = handle.await;
+        }
         self.download_items.remove(id);
         Ok(())
     }

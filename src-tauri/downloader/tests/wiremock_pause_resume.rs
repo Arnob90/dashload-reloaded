@@ -445,6 +445,49 @@ async fn stop_after_reconstruct_completes() {
     cleanup_file(&path).await;
 }
 
+/// Test: `DownloadManager::delete` stops the running download, removes the runner handle, and removes the item from download_items.
+#[tokio::test]
+async fn test_delete_download_stops_and_removes_item() {
+    let mock_server = setup_pause_resume_mock_server().await;
+    let client = reqwest::Client::new();
+    let manager = DownloadManager::new(client, 100);
+    let path = temp_filepath("wiremock_delete_test");
+
+    let id = manager
+        .add_download(
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
+        )
+        .await
+        .expect("Failed to add download");
+
+    wait_for_state(
+        &manager,
+        &id,
+        DownloadState::Running {
+            download_speed: 0.0,
+        },
+        5_000,
+    )
+    .await;
+
+    manager.delete(&id).await.expect("delete should succeed");
+
+    assert!(
+        manager.get_item_status(&id).is_err(),
+        "item should no longer exist in download_items after delete"
+    );
+    assert!(
+        !manager.runner_handles.contains_key(&id),
+        "runner handle should be removed after delete"
+    );
+
+    cleanup_file(&path).await;
+}
+
 /// Helper to wait for a specific download state
 async fn wait_for_state(
     manager: &DownloadManager,

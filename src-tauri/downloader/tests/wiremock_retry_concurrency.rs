@@ -202,3 +202,45 @@ async fn stop_and_resume_do_not_deadlock() {
     .await
     .expect("test timed out (possible deadlock)");
 }
+
+/// Concurrency regression: `delete` must hold the per-download operation lock
+/// across stop + remove, so a concurrent `retry` cannot re-insert a new
+/// DownloadItem that `delete` would then silently orphan.
+#[tokio::test]
+async fn concurrent_delete_and_retry_orphans_no_runner() {
+    timeout(Duration::from_secs(25), async {
+        let server = start_universal_mock_server(SMALL_FILE_SIZE, Duration::from_secs(2)).await;
+        let manager = DownloadManager::new(reqwest::Client::new(), 50);
+        let path = temp_filepath("delete_retry_concurrent");
+
+        let id = add_and_stop(&manager, &server, &path).await;
+
+        let (delete_result, retry_result) = tokio::join!(
+            timeout(Duration::from_secs(15), manager.delete(&id)),
+            timeout(Duration::from_secs(15), manager.retry(&id)),
+        );
+        delete_result
+            .expect("delete timed out")
+            .expect("delete failed");
+        let _retry_result = retry_result.expect("retry timed out");
+
+        // No orphaned runner handle may linger, and the item must be gone.
+        assert!(
+            !manager.runner_handles.contains_key(&id),
+            "delete must remove the runner handle even under concurrent retry"
+        );
+        assert!(
+            manager.get_item_status(&id).is_err(),
+            "item must be removed from download_items after delete"
+        );
+        assert_eq!(
+            manager.runner_handles.len(),
+            0,
+            "no background runner tasks may remain after delete"
+        );
+
+        cleanup_file(&path).await;
+    })
+    .await
+    .expect("test timed out (possible deadlock)");
+}
