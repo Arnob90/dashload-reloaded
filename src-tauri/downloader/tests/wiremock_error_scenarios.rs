@@ -10,17 +10,7 @@ use std::time::Duration;
 use wiremock::MockServer;
 
 mod wiremock_helpers;
-use console_subscriber;
-use log::info;
-use std::sync::Once;
 use wiremock_helpers::*;
-
-static INIT: Once = Once::new();
-fn init_console_subscriber() {
-    INIT.call_once(|| {
-        console_subscriber::init();
-    });
-}
 
 /// Test: Server returns 404 -> DownloadRunError::ServerError
 #[tokio::test]
@@ -46,7 +36,7 @@ async fn test_server_returns_404() {
         .expect("Download timed out");
 
     assert!(
-        matches!(status.state, DownloadState::Failed(e) if matches!(e, DownloadRunError::ServerError(_)))
+        matches!(status.state, DownloadState::Failed(f) if matches!(f.error, DownloadRunError::ServerError { .. }))
     );
 
     cleanup_file(&path).await;
@@ -76,7 +66,7 @@ async fn test_server_returns_500() {
         .expect("Download timed out");
 
     assert!(
-        matches!(status.state, DownloadState::Failed(e) if matches!(e, DownloadRunError::ServerError(_)))
+        matches!(status.state, DownloadState::Failed(f) if matches!(f.error, DownloadRunError::ServerError { .. }))
     );
 
     cleanup_file(&path).await;
@@ -114,7 +104,7 @@ async fn test_network_timeout() {
         .expect("Download timed out");
 
     assert!(
-        matches!(status.state, DownloadState::Failed(e) if matches!(e, DownloadRunError::NetworkError(_)))
+        matches!(status.state, DownloadState::Failed(f) if matches!(f.error, DownloadRunError::NetworkError { .. }))
     );
 
     cleanup_file(&path).await;
@@ -191,7 +181,7 @@ async fn test_range_not_satisfiable() {
         .expect("Download timed out");
 
     assert!(
-        matches!(status.state, DownloadState::Failed(e) if matches!(e, DownloadRunError::ServerError(_)))
+        matches!(status.state, DownloadState::Failed(f) if matches!(f.error, DownloadRunError::ServerError { .. }))
     );
 
     cleanup_file(&path).await;
@@ -200,8 +190,6 @@ async fn test_range_not_satisfiable() {
 /// Test: Server closes connection mid-download -> DownloadRunError::NetworkError
 #[tokio::test]
 async fn test_connection_reset() {
-    init_console_subscriber();
-    info!("Starting test_connection_reset");
     let mock_server = MockServer::start().await;
     let content = test_file_content();
     let total_size = content.len();
@@ -258,17 +246,14 @@ async fn test_connection_reset() {
         )
         .await
         .expect("Failed to add download");
-    info!("Added download with ID: {}", id);
 
     // Poll until the 2s timeout fails the download
     let start = std::time::Instant::now();
     let mut final_status = None;
 
-    info!("Final status before polling: {:?}", final_status);
     let mut i = 0;
     while start.elapsed() < Duration::from_secs(5) {
         let status = manager.get_item_status(&id).unwrap();
-        info!("Poll {}: status = {:?}", i, status.state);
         if matches!(status.state, DownloadState::Failed(_)) {
             final_status = Some(status);
             break;
@@ -281,7 +266,7 @@ async fn test_connection_reset() {
     assert!(
         matches!(
             final_status.state,
-            DownloadState::Failed(ref e) if matches!(e, DownloadRunError::NetworkError(_))
+            DownloadState::Failed(ref f) if matches!(f.error, DownloadRunError::NetworkError { .. })
         ),
         "Expected NetworkError, got: {:?}",
         final_status.state
