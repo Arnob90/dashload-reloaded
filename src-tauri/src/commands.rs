@@ -97,6 +97,14 @@ fn get_data(state: State<'_, AppState>) -> HashMap<String, DownloadData> {
 }
 
 #[tauri::command]
+async fn retry_download(
+    state: State<'_, AppState>,
+    id: &str,
+) -> Result<String, ApiError<ManagerError>> {
+    Ok(state.download_manager.retry(id).await?)
+}
+
+#[tauri::command]
 async fn save_session(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -125,6 +133,7 @@ pub fn get_handlers() -> impl Fn(Invoke<tauri::Wry>) -> bool {
         get_download_metadata,
         pause,
         resume,
+        retry_download,
         get_data,
         save_session,
         delete_download,

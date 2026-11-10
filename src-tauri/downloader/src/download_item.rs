@@ -1,5 +1,5 @@
 use crate::download_data::DownloadData;
-use crate::download_run_error::DownloadRunError;
+use crate::download_run_error::{DownloadRunError, FailureDetails};
 use crate::download_status::{DownloadState, DownloadStatus};
 use crate::in_place_segment::{InPlaceSegment, SegmentCommand};
 use crate::verifier::VerifierMaybe;
@@ -131,15 +131,27 @@ impl DownloadItem {
         let filepath_clone = self.filepath.clone();
         let verified = tokio::task::spawn_blocking(move || verify_clone.verify(&filepath_clone))
             .await
-            .map_err(|e| DownloadRunError::DiskError(format!("Verification task panicked {}", e)))?
-            .map_err(|e| {
-                DownloadRunError::DiskError(format!("IO error during validation {}", e))
+            .map_err(|e| DownloadRunError::DiskError {
+                message: format!("Verification task panicked {}", e),
+                path: None,
+            })?
+            .map_err(|e| DownloadRunError::DiskError {
+                message: format!("IO error during validation {}", e),
+                path: None,
             })?;
         if !verified {
+            let expected = self
+                .verifier
+                .expected_hash()
+                .unwrap_or("unknown")
+                .to_string();
             let _ = self
                 .verify_result_sender
                 .send(VerificationState::VerifyFailed);
-            return Err(DownloadRunError::VerifyError);
+            return Err(DownloadRunError::VerifyError {
+                expected,
+                actual: "checksum mismatch".to_string(),
+            });
         }
         let _ = self.verify_result_sender.send(VerificationState::Verified);
         Ok(())
@@ -177,8 +189,8 @@ impl DownloadItem {
                 DownloadState::Completed { .. } => {
                     all_retrying = false;
                 }
-                DownloadState::Failed(err) => {
-                    any_failed = Some(err.clone());
+                DownloadState::Failed(failure) => {
+                    any_failed = Some(failure.clone());
                     all_completed = false;
                     all_retrying = false;
                 }
@@ -232,7 +244,15 @@ impl DownloadItem {
             overall_state = match *self.verify_result_receiver.borrow() {
                 VerificationState::Verifying => DownloadState::Verifying,
                 VerificationState::VerifyFailed => {
-                    DownloadState::Failed(DownloadRunError::VerifyError)
+                    let expected = self
+                        .verifier
+                        .expected_hash()
+                        .unwrap_or("unknown")
+                        .to_string();
+                    DownloadState::Failed(FailureDetails::new(DownloadRunError::VerifyError {
+                        expected,
+                        actual: "unknown".to_string(),
+                    }))
                 }
                 VerificationState::Verified => overall_state,
             }

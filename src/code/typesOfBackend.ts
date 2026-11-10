@@ -65,28 +65,124 @@ export type Config = z.infer<typeof ConfigSchema>;
 export const DownloadRunErrorSchema = z.discriminatedUnion("kind", [
     z.object({
         kind: z.literal("NetworkError"),
-        payload: z.string(),
+        payload: z.object({
+            message: z.string(),
+            status_code: z.number().nullable(),
+        }),
     }),
     z.object({
         kind: z.literal("ServerError"),
-        payload: z.string(),
+        payload: z.object({
+            message: z.string(),
+            status_code: z.number().nullable(),
+        }),
     }),
     z.object({
         kind: z.literal("DiskError"),
-        payload: z.string(),
+        payload: z.object({
+            message: z.string(),
+            path: z.string().nullable(),
+        }),
     }),
     z.object({
         kind: z.literal("AlreadyRunning"),
     }),
     z.object({
         kind: z.literal("VerifyError"),
+        payload: z.object({
+            expected: z.string(),
+            actual: z.string(),
+        }),
     }),
     z.object({
         kind: z.literal("TimeoutError"),
+        payload: z.object({
+            secs: z.number(),
+        }),
     }),
 ]);
 
 export type DownloadRunError = z.infer<typeof DownloadRunErrorSchema>;
+
+/** Rich failure details attached to a Failed state */
+export const FailureDetailsSchema = z.object({
+    error: DownloadRunErrorSchema,
+    timestamp_secs: z.number(),
+    failed_segment_index: z.number().nullable(),
+    attempts_made: z.number(),
+});
+export type FailureDetails = z.infer<typeof FailureDetailsSchema>;
+
+// ============================================================================
+// 2b. Legacy state normalization
+// ============================================================================
+/** Normalizes a legacy bare `DownloadRunError` payload (string payloads) into
+ *  the current rich struct-payload format. */
+function normalizeLegacyRunError(value: unknown): unknown {
+    if (typeof value !== "object" || value === null) return value;
+    const v = value as Record<string, unknown>;
+    const payload = v.payload;
+    switch (v.kind) {
+        case "NetworkError":
+        case "ServerError": {
+            if (payload && typeof payload === "object") return v;
+            return {
+                ...v,
+                payload: {
+                    message: typeof payload === "string" ? payload : "Unknown error",
+                    status_code: null,
+                },
+            };
+        }
+        case "DiskError": {
+            if (payload && typeof payload === "object") return v;
+            return {
+                ...v,
+                payload: {
+                    message: typeof payload === "string" ? payload : "Unknown error",
+                    path: null,
+                },
+            };
+        }
+        case "VerifyError": {
+            if (payload && typeof payload === "object") return v;
+            return {
+                ...v,
+                payload: { expected: "unknown", actual: "unknown" },
+            };
+        }
+        case "TimeoutError": {
+            if (payload && typeof payload === "object") return v;
+            return { ...v, payload: { secs: 0 } };
+        }
+        default:
+            return v; // AlreadyRunning and any unknown future kinds pass through
+    }
+}
+
+/** Coerces the `Failed` state payload into `FailureDetails`, migrating payloads
+ *  persisted by older app versions (which stored a bare `DownloadRunError`). */
+function normalizeFailureDetails(value: unknown): unknown {
+    if (typeof value !== "object" || value === null) return value;
+    const v = value as Record<string, unknown>;
+    if (v.error && typeof v.error === "object") {
+        // New format: normalize the inner error defensively
+        return {
+            error: normalizeLegacyRunError(v.error),
+            timestamp_secs: typeof v.timestamp_secs === "number" ? v.timestamp_secs : 0,
+            failed_segment_index:
+                typeof v.failed_segment_index === "number" ? v.failed_segment_index : null,
+            attempts_made: typeof v.attempts_made === "number" ? v.attempts_made : 0,
+        };
+    }
+    // Legacy format: payload was a bare DownloadRunError
+    return {
+        error: normalizeLegacyRunError(v),
+        timestamp_secs: 0,
+        failed_segment_index: null,
+        attempts_made: 0,
+    };
+}
 
 // ============================================================================
 // 2. Download State & Status
@@ -108,7 +204,7 @@ export const DownloadStateSchema = z.discriminatedUnion("kind", [
     }),
     z.object({
         kind: z.literal("Failed"),
-        payload: DownloadRunErrorSchema,
+        payload: z.preprocess(normalizeFailureDetails, FailureDetailsSchema),
     }),
     z.object({ kind: z.literal("Paused") }),
     z.object({ kind: z.literal("Verifying") }),

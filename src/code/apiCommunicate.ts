@@ -73,6 +73,18 @@ export async function resume(id: string): Promise<void> {
         throw ManagerApiErrorSchema.parse(err)
     }
 }
+
+export async function retryDownload(id: string): Promise<string> {
+    try {
+        const idMaybe = await invoke("retry_download", {
+            id: id,
+        })
+        return await z.string().parseAsync(idMaybe)
+    }
+    catch (err) {
+        throw ManagerApiErrorSchema.parse(err)
+    }
+}
 export async function getData(): Promise<DownloadDataMap> {
     try {
         const res = await invoke("get_data")

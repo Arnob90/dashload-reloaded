@@ -10,6 +10,7 @@ import {
     getDownloadMetadata,
     pause,
     resume,
+    retryDownload,
     getData,
     getItemStatus,
     saveSession,
@@ -127,6 +128,20 @@ export function useResumeDownload() {
         mutationFn: (id: string) => resume(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: downloadKeys.status() });
+        },
+    });
+}
+
+/**
+ * Retries a failed or stopped download by ID and invalidates the status cache.
+ */
+export function useRetryDownload() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (id: string) => retryDownload(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: downloadKeys.all });
         },
     });
 }

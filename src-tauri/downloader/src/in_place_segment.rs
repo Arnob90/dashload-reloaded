@@ -1,4 +1,4 @@
-use crate::download_run_error::DownloadRunError;
+use crate::download_run_error::{DownloadRunError, FailureDetails};
 use crate::download_status::{DownloadState, DownloadStatus};
 use crate::info_getters::get_filesize;
 use crate::request_headers::RequestHeaders;
@@ -182,8 +182,16 @@ impl InPlaceSegment {
         // If start_internal returned an Err, emit the failure status to self.sender
         if let Err(ref err) = res {
             eprintln!("Segment download failed: {:?}", err);
+            // Recover how many retry attempts were made: if the last published
+            // state was `Retrying`, its `attempt` field holds the count; otherwise
+            // the failure was non-retryable (attempts_made == 0).
+            let attempts_made = match self.sender.borrow().state {
+                DownloadState::Retrying { attempt, .. } => attempt,
+                _ => 0,
+            };
+            let details = FailureDetails::new(err.clone()).with_attempts(attempts_made);
             self.sender.send_modify(|status| {
-                status.state = DownloadState::Failed(err.clone());
+                status.state = DownloadState::Failed(details.clone());
             });
             eprintln!("Sent failure status to channel");
             eprintln!("Current status: {:?}", self.sender.borrow());
@@ -233,7 +241,9 @@ impl InPlaceSegment {
 
                 // Read timed out (no data for 10s)
                 Err(_) => {
-                    return Err(DownloadRunError::TimeoutError);
+                    return Err(DownloadRunError::TimeoutError {
+                        secs: chunk_wait_timeout.as_secs(),
+                    });
                 }
 
                 // Socket error / connection reset
@@ -298,16 +308,20 @@ impl InPlaceSegment {
                         return Ok(FetchResponseOutcome::Stopped);
                     }
                     SegmentCommand::Nothing => {
-                        return Err(DownloadRunError::NetworkError(
-                            "Unexpected command received".to_owned(),
-                        ));
+                        return Err(DownloadRunError::NetworkError {
+                            message: "Unexpected command received".to_owned(),
+                            status_code: None,
+                        });
                     }
                 }
             }
         };
         res_result
             .map(FetchResponseOutcome::Response)
-            .map_err(|e| DownloadRunError::NetworkError(e.to_string()))
+            .map_err(|e| DownloadRunError::NetworkError {
+                message: e.to_string(),
+                status_code: e.status().map(|s| s.as_u16()),
+            })
     }
     async fn start_internal(&self) -> Result<(), DownloadRunError> {
         let status = self.sender.borrow().clone().state;
@@ -533,21 +547,22 @@ impl InPlaceSegment {
             // All retries exhausted on an HTTP error status: report it as a
             // server error (it *was* an HTTP error response), distinct from a
             // transport-level failure.
-            return Err(DownloadRunError::ServerError(format!(
-                "Server returned HTTP {}",
-                status
-            )));
+            return Err(DownloadRunError::ServerError {
+                message: format!("Server returned HTTP {}", status),
+                status_code: Some(status.as_u16()),
+            });
         }
 
         if range_header.is_some() && status != StatusCode::PARTIAL_CONTENT {
-            return Err(DownloadRunError::ServerError(
-                "Server does not support range requests".to_owned(),
-            ));
+            return Err(DownloadRunError::ServerError {
+                message: "Server does not support range requests".to_owned(),
+                status_code: Some(status.as_u16()),
+            });
         } else if !status.is_success() {
-            return Err(DownloadRunError::ServerError(format!(
-                "Server returned HTTP {}",
-                status
-            )));
+            return Err(DownloadRunError::ServerError {
+                message: format!("Server returned HTTP {}", status),
+                status_code: Some(status.as_u16()),
+            });
         }
         eprintln!("It didn't stop?");
 
@@ -599,9 +614,10 @@ impl InPlaceSegment {
         }
 
         let Some(mut res) = session.response.take() else {
-            return Err(DownloadRunError::NetworkError(
-                "No active response in Download state".to_owned(),
-            ));
+            return Err(DownloadRunError::NetworkError {
+                message: "No active response in Download state".to_owned(),
+                status_code: None,
+            });
         };
 
         let mut current_downloaded = downloaded;
@@ -638,8 +654,9 @@ impl InPlaceSegment {
                     completed: false,
                 })
             }
-            Err(DownloadRunError::NetworkError(_) | DownloadRunError::TimeoutError)
-                if attempts < self.retry_scheme.max_attempts =>
+            Err(
+                DownloadRunError::NetworkError { .. } | DownloadRunError::TimeoutError { .. },
+            ) if attempts < self.retry_scheme.max_attempts =>
             {
                 Ok(DownloadingState::Retry {
                     downloaded: current_downloaded,

@@ -1,4 +1,4 @@
-use crate::download_run_error::DownloadRunError;
+use crate::download_run_error::{DownloadRunError, FailureDetails};
 use serde::{self, Deserialize, Serialize};
 
 /// Represents the current lifecycle state of a download item.
@@ -11,8 +11,8 @@ pub enum DownloadState {
     Running { download_speed: f64 },
     /// Download completed successfully with the given total size.
     Completed { size: u64 },
-    /// Download failed with the specified error.
-    Failed(DownloadRunError),
+    /// Download failed with the specified rich error details.
+    Failed(FailureDetails),
     /// Download is paused and can be resumed.
     Paused,
     /// Post-download checksum verification is in progress.
@@ -22,6 +22,16 @@ pub enum DownloadState {
         max_attempts: u32,
         wait_secs: u64,
     },
+}
+
+impl DownloadState {
+    /// Returns the raw `DownloadRunError` if this state is `Failed`, otherwise `None`.
+    pub fn get_error(&self) -> Option<&DownloadRunError> {
+        match self {
+            DownloadState::Failed(failure) => Some(&failure.error),
+            _ => None,
+        }
+    }
 }
 
 /// Aggregated status snapshot for a download item at a point in time.
