@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActionIcon, Box, Flex, Group, Badge, Menu, Progress, Table, Text } from "@mantine/core";
+import { ActionIcon, Box, Flex, Group, Badge, Menu, Progress, Table, Text, Tooltip } from "@mantine/core";
 import { bytesToMIB } from "../../code/utils.ts";
 import {
     createColumnHelper,
@@ -17,13 +17,36 @@ import {
     usePauseDownload,
     useResumeDownload,
     useDeleteDownload,
+    useRetryDownload,
 } from "../../code/useDownloads.ts";
 import { notifications } from "@mantine/notifications";
-import { ChevronRight, FolderOpen, Pause, Trash, FileArchive, FileCode, File as DefaultFile } from "lucide-react";
+import { ChevronRight, FolderOpen, Pause, Trash, FileArchive, FileCode, File as DefaultFile, RotateCcw, CircleAlert } from "lucide-react";
 import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener"
 import { useTableEntries, TableEntry } from "./tableEntry.ts";
 import { formatTime } from "../../code/utils.ts";
 import { DownloadDetailsPane } from "./downloadDetails.tsx";
+import type { FailureDetails } from "../../code/typesOfBackend.ts";
+
+/** Short, human-readable summary of a FailureDetails payload for tooltips. */
+function summarizeFailureDetails(details: FailureDetails): string {
+    const { error } = details;
+    let summary: string;
+    switch (error.kind) {
+        case "VerifyError":
+            summary = `Checksum mismatch (expected ${error.payload.expected}, got ${error.payload.actual})`;
+            break;
+        case "TimeoutError":
+            summary = `Timed out after ${error.payload.secs}s`;
+            break;
+        case "AlreadyRunning":
+            summary = "Download is already running";
+            break;
+        default:
+            summary = error.payload.message ?? "Unknown error";
+    }
+    const attempts = details.attempts_made > 0 ? ` · ${details.attempts_made} attempt(s) made` : "";
+    return `${summary}${attempts}`;
+}
 
 const features = tableFeatures({
     rowSortingFeature,
@@ -50,6 +73,7 @@ export function DownloadTable() {
     const { mutate: pauseDownload } = usePauseDownload();
     const { mutate: resumeDownload } = useResumeDownload();
     const { mutate: deleteDownload } = useDeleteDownload();
+    const { mutate: retryDownload } = useRetryDownload();
     const [sorting, setSorting] = useState<SortingState>([])
     const handleOpenInFileManager = (path: string) => {
         revealItemInDir(path)
@@ -81,6 +105,25 @@ export function DownloadTable() {
             },
         });
     }, [resumeDownload]);
+
+    const handleRetry = useCallback((id: string) => {
+        retryDownload(id, {
+            onError: (err) => {
+                notifications.show({
+                    title: "Failed to Retry",
+                    message: err.message,
+                    color: "red",
+                });
+            },
+            onSuccess: () => {
+                notifications.show({
+                    title: "Retrying",
+                    message: "The download has been restarted.",
+                    color: "blue",
+                });
+            },
+        });
+    }, [retryDownload]);
     const handleDelete = useCallback((id: string) => {
         deleteDownload(id, {
             onError: (err) => {
@@ -133,6 +176,22 @@ export function DownloadTable() {
                         );
                     }
 
+                    if (stateKind === "Failed" || stateKind === "Stopped") {
+                        return (
+                            <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                onClick={(e) => {
+                                    e.stopPropagation(); // Prevents row selection toggle on button click
+                                    handleRetry(info.row.original.id);
+                                }}
+                                onMouseDown={(e) => e.stopPropagation()}
+                            >
+                                <RotateCcw size={18} style={{ pointerEvents: "none" }} />
+                            </ActionIcon>
+                        );
+                    }
+
                     return null;
                 },
             }),
@@ -149,17 +208,50 @@ export function DownloadTable() {
             }),
             columnHelper.accessor("status", {
                 header: "Status",
-                size: 110,
+                size: 130,
                 cell: (info) => {
-                    const kind = info.getValue().kind
+                    const state = info.getValue();
+                    const kind = state.kind
                     const colorMap: Record<string, string> = {
                         Running: "blue",
                         Completed: "teal",
                         Paused: "yellow",
                         Failed: "red",
-                        Stopped: "gray"
+                        Stopped: "gray",
+                        Verifying: "violet",
+                        Retrying: "orange",
                     }
-                    return <Badge color={colorMap[kind]} variant="light" size="sm">
+                    const color = colorMap[kind] ?? "gray";
+
+                    if (kind === "Retrying") {
+                        const { attempt, max_attempts } = state.payload;
+                        return <Badge color={color} variant="light" size="sm" leftSection={<RotateCcw size={12} />}>
+                            Retrying ({attempt}/{max_attempts})
+                        </Badge>;
+                    }
+
+                    if (kind === "Failed") {
+                        const label = (
+                            <Group gap="xs" wrap="nowrap">
+                                <Badge color={color} variant="light" size="sm" style={{ pointerEvents: "none" }}>
+                                    Failed
+                                </Badge>
+                                <CircleAlert size={14} color="var(--mantine-color-red-6)" style={{ pointerEvents: "none" }} />
+                            </Group>
+                        );
+                        return (
+                            <Tooltip
+                                label={info.row.original.failureDetails ? summarizeFailureDetails(info.row.original.failureDetails) : "Download failed"}
+                                w={300}
+                                multiline
+                                withArrow
+                            >
+                                {label}
+                            </Tooltip>
+                        );
+                    }
+
+                    return <Badge color={color} variant="light" size="sm">
                         {kind}
                     </Badge>
                 },
@@ -209,6 +301,8 @@ export function DownloadTable() {
                     const val = info.getValue();
                     if (val === null) return <Text size="xs" c="dimmed">-</Text>;
                     const pct = Math.round(val * 100);
+                    const kind = info.row.original.status.kind;
+                    const color = kind === "Failed" ? "red" : pct === 100 ? "teal" : "blue";
 
                     return (
                         <Group gap="xs" wrap="nowrap" justify="center" mx="auto" style={{ width: "100%", maxHeight: 220 }}>
@@ -216,9 +310,9 @@ export function DownloadTable() {
                                 value={pct}
                                 size="md" // 👈 8px thickness instead of 4px
                                 radius="xl" // 👈 Smooth pill corners
-                                color={pct === 100 ? "teal" : "blue"}
-                                striped={pct < 100 && pct > 0}
-                                animated={pct < 100 && pct > 0}
+                                color={color}
+                                striped={pct < 100 && pct > 0 && kind !== "Failed"}
+                                animated={pct < 100 && pct > 0 && kind !== "Failed"}
                                 style={{ flex: 1 }} // 👈 Automatically fills the available column space
                             />
                             <Text size="xs" fw={600} w={38} ta="right" c={pct === 100 ? "teal" : undefined}>
@@ -237,7 +331,7 @@ export function DownloadTable() {
                 ),
             }),
         ]),
-        [handlePause, handleResume]
+        [handlePause, handleResume, handleRetry]
     );
 
     const tableModel = useTable({
@@ -306,6 +400,11 @@ export function DownloadTable() {
                                     </Table.Tr>
                                 </Menu.ContextMenu>
                                 <Menu.Dropdown>
+                                    {(row.original.status.kind === "Failed" || row.original.status.kind === "Stopped") && (
+                                        <Menu.Item leftSection={<RotateCcw size={16} />} onClick={() => handleRetry(row.original.id)}>
+                                            Retry Download
+                                        </Menu.Item>
+                                    )}
                                     <Menu.Item onClick={() => handleOpenFile(row.original.filepath)}>
                                         Open File
                                     </Menu.Item>

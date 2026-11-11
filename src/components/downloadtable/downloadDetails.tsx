@@ -13,16 +13,121 @@ import {
     Code,
     ScrollArea,
     Stack,
+    Button,
 } from "@mantine/core";
 import { bytesToMIB } from "../../code/utils.ts";
-import { useDownloadData } from "../../code/useDownloads.ts";
+import { useDownloadData, useRetryDownload } from "../../code/useDownloads.ts";
 import { TableEntry } from "./tableEntry.ts";
-import { Copy, Check, X, FolderOpen, Globe } from "lucide-react";
+import { Copy, Check, X, FolderOpen, Globe, RotateCcw } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { notifications } from "@mantine/notifications";
+import type { DownloadRunError, FailureDetails } from "../../code/typesOfBackend.ts";
 
 interface DownloadDetailsPaneProps {
     entry: TableEntry;
     onClose: () => void;
+}
+
+// ============================================================================
+// Error & Diagnostics helpers
+// ============================================================================
+
+/** Human-readable category label for a typed download error. */
+function errorCategoryLabel(error: DownloadRunError): string {
+    switch (error.kind) {
+        case "NetworkError":
+            return error.payload.status_code != null
+                ? `Network Error (HTTP ${error.payload.status_code})`
+                : "Network Error";
+        case "ServerError":
+            return error.payload.status_code != null
+                ? `Server Error (HTTP ${error.payload.status_code})`
+                : "Server Error";
+        case "DiskError":
+            return "Disk I/O Error";
+        case "VerifyError":
+            return "Checksum Verification Failed";
+        case "TimeoutError":
+            return "Download Timed Out";
+        case "AlreadyRunning":
+            return "Already Running";
+        default:
+            return "Unknown Error";
+    }
+}
+
+/** Actionable remediation hint for a typed download error. */
+function errorRemediation(error: DownloadRunError): string {
+    switch (error.kind) {
+        case "NetworkError":
+            return "Check your internet connection or the remote host, then retry.";
+        case "ServerError":
+            return "The server rejected the request. Wait a moment and retry, or check that the URL is still valid.";
+        case "DiskError":
+            return "Check free disk space, folder write permissions, and that the save path still exists.";
+        case "VerifyError":
+            return "The downloaded file does not match its expected checksum. Retry the download to fetch a fresh copy.";
+        case "TimeoutError":
+            return "No data was received within the timeout window. Retry, or try again on a faster connection.";
+        case "AlreadyRunning":
+            return "The download is already running; no action needed.";
+        default:
+            return "Retry the download; if the problem persists, delete and re-add it.";
+    }
+}
+
+function errorMessage(error: DownloadRunError): string {
+    switch (error.kind) {
+        case "NetworkError":
+        case "ServerError":
+        case "DiskError":
+            return error.payload.message;
+        case "VerifyError":
+            return `Expected hash ${error.payload.expected}, got ${error.payload.actual}`;
+        case "TimeoutError":
+            return `Timed out waiting for next chunk after ${error.payload.secs}s`;
+        case "AlreadyRunning":
+            return "Download is already running";
+    }
+}
+
+/** Builds a copy-ready multi-line diagnostics report for a failure. */
+function buildErrorReport(entry: TableEntry, details: FailureDetails): string {
+    const lines: string[] = [
+        `Filename: ${entry.filename}`,
+        `URL: ${entry.url}`,
+        `Save location: ${entry.filepath}`,
+        `Category: ${errorCategoryLabel(details.error)}`,
+        `Message: ${errorMessage(details.error)}`,
+    ];
+    if (details.error.kind === "DiskError" && details.error.payload.path) {
+        lines.push(`Path: ${details.error.payload.path}`);
+    }
+    if (details.error.kind === "VerifyError") {
+        lines.push(`Expected hash: ${details.error.payload.expected}`);
+        lines.push(`Actual hash:   ${details.error.payload.actual}`);
+    }
+    if (details.error.kind === "TimeoutError") {
+        lines.push(`Timeout: ${details.error.payload.secs}s`);
+    }
+    if (details.error.kind === "NetworkError" || details.error.kind === "ServerError") {
+        if (details.error.payload.status_code != null) {
+            lines.push(`HTTP status: ${details.error.payload.status_code}`);
+        }
+    }
+    lines.push(
+        `Failed at: ${details.timestamp_secs > 0 ? new Date(details.timestamp_secs * 1000).toLocaleString() : "unknown"}`,
+    );
+    lines.push(
+        `Failed segment: ${
+            details.failed_segment_index != null
+                ? `Segment ${details.failed_segment_index + 1}`
+                : "unknown"
+        }`,
+    );
+    lines.push(`Retry attempts made: ${details.attempts_made}`);
+    lines.push(`Suggested action: ${errorRemediation(details.error)}`);
+    return lines.join("\n");
 }
 
 export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps) {
@@ -33,7 +138,11 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
         Failed: "red",
         Stopped: "gray",
         Verifying: "violet",
+        Retrying: "orange",
     };
+
+    const isFailed = entry.status.kind === "Failed";
+    const defaultTab = isFailed ? "error" : "overview";
 
     const pct =
         entry.downloadedPortion != null ? Math.round(entry.downloadedPortion * 100) : 0;
@@ -44,6 +153,26 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
     // A download is segmented when any segment carries explicit byte boundaries.
     // If every `info` is null, the backend used a single non-ranged stream.
     const isSegmented = segments.some((segment) => segment.info != null);
+
+    const { mutate: retryDownload } = useRetryDownload();
+    const handleRetry = () => {
+        retryDownload(entry.id, {
+            onError: (err) => {
+                notifications.show({
+                    title: "Failed to Retry",
+                    message: err.message,
+                    color: "red",
+                });
+            },
+            onSuccess: () => {
+                notifications.show({
+                    title: "Retrying",
+                    message: "The download has been restarted.",
+                    color: "blue",
+                });
+            },
+        });
+    };
 
     const handleReveal = async () => {
         try {
@@ -67,13 +196,18 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
             }}
             p="md"
         >
-            <Tabs defaultValue="overview" variant="pills" radius="sm">
+            <Tabs defaultValue={defaultTab} variant="pills" radius="sm">
                 {/* Top Header: Tabs on Left, Close (X) on Right */}
                 <Group justify="space-between" mb="sm">
                     <Tabs.List>
                         <Tabs.Tab value="overview" fz="xs" fw={500}>
                             Overview
                         </Tabs.Tab>
+                        {isFailed && (
+                            <Tabs.Tab value="error" fz="xs" fw={500}>
+                                Error & Diagnostics
+                            </Tabs.Tab>
+                        )}
                         <Tabs.Tab value="segments" fz="xs" fw={500}>
                             Segments
                         </Tabs.Tab>
@@ -179,6 +313,124 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                         </Paper>
                     </SimpleGrid>
                 </Tabs.Panel>
+
+                {/* TAB 1b: ERROR & DIAGNOSTICS (only visible when Failed) */}
+                {isFailed && (
+                    <Tabs.Panel value="error">
+                        <Stack gap="sm">
+                            <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                <Text size="xs" fw={600} c="dimmed" mb={2}>
+                                    FAILURE CATEGORY
+                                </Text>
+                                <Badge color="red" variant="light" size="sm">
+                                    {errorCategoryLabel(entry.failureDetails!.error)}
+                                </Badge>
+                            </Paper>
+
+                            <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                <Text size="xs" fw={600} c="dimmed" mb={2}>
+                                    FAILURE MESSAGE
+                                </Text>
+                                <Text size="xs" style={{ wordBreak: "break-word" }}>
+                                    {errorMessage(entry.failureDetails!.error)}
+                                </Text>
+                            </Paper>
+
+                            {entry.failureDetails!.error.kind === "DiskError" &&
+                                entry.failureDetails!.error.payload.path && (
+                                    <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                        <Text size="xs" fw={600} c="dimmed" mb={2}>
+                                            AFFECTED PATH
+                                        </Text>
+                                        <Text size="xs" style={{ wordBreak: "break-all" }}>
+                                            {entry.failureDetails!.error.payload.path}
+                                        </Text>
+                                    </Paper>
+                                )}
+
+                            {entry.failureDetails!.error.kind === "VerifyError" && (
+                                <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                    <Text size="xs" fw={600} c="dimmed" mb={2}>
+                                        CHECKSUM MISMATCH
+                                    </Text>
+                                    <Text size="xs" style={{ wordBreak: "break-all" }}>
+                                        Expected: {entry.failureDetails!.error.payload.expected}
+                                    </Text>
+                                    <Text size="xs" style={{ wordBreak: "break-all" }}>
+                                        Actual:   {entry.failureDetails!.error.payload.actual}
+                                    </Text>
+                                </Paper>
+                            )}
+
+                            <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                <Text size="xs" fw={600} c="dimmed" mb={2}>
+                                    SUGGESTED ACTION
+                                </Text>
+                                <Text size="xs" c="dimmed">
+                                    {errorRemediation(entry.failureDetails!.error)}
+                                </Text>
+                            </Paper>
+
+                            <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="xs">
+                                <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                    <Text size="xs" fw={600} c="dimmed" mb={2}>
+                                        FAILED AT
+                                    </Text>
+                                    <Text size="xs">
+                                        {entry.failureDetails!.timestamp_secs > 0
+                                            ? new Date(
+                                                entry.failureDetails!.timestamp_secs * 1000,
+                                            ).toLocaleString()
+                                            : "unknown"}
+                                    </Text>
+                                </Paper>
+                                <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                    <Text size="xs" fw={600} c="dimmed" mb={2}>
+                                        FAILED SEGMENT
+                                    </Text>
+                                    <Text size="xs">
+                                        {entry.failureDetails!.failed_segment_index != null
+                                            ? `Segment ${entry.failureDetails!.failed_segment_index + 1}`
+                                            : "unknown"}
+                                    </Text>
+                                </Paper>
+                                <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                    <Text size="xs" fw={600} c="dimmed" mb={2}>
+                                        ATTEMPTS MADE
+                                    </Text>
+                                    <Text size="xs">{entry.failureDetails!.attempts_made}</Text>
+                                </Paper>
+                            </SimpleGrid>
+
+                            <Group justify="space-between" mt="xs">
+                                <CopyButton
+                                    value={buildErrorReport(entry, entry.failureDetails!)}
+                                    timeout={3000}
+                                >
+                                    {({ copied, copy }) => (
+                                        <Button
+                                            variant="light"
+                                            size="xs"
+                                            leftSection={copied ? <Check size={12} /> : <Copy size={12} />}
+                                            onClick={copy}
+                                        >
+                                            {copied ? "Copied" : "Copy Error Details"}
+                                        </Button>
+                                    )}
+                                </CopyButton>
+                                <Button
+                                    variant="filled"
+                                    color="red"
+                                    size="xs"
+                                    leftSection={<RotateCcw size={12} />}
+                                    onClick={handleRetry}
+                                >
+                                    Retry Download
+                                </Button>
+                            </Group>
+                        </Stack>
+                    </Tabs.Panel>
+                )}
 
                 {/* TAB 2: PER-SEGMENT PROGRESS */}
                 <Tabs.Panel value="segments">
