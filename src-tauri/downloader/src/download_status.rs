@@ -52,17 +52,71 @@ impl<'de> Deserialize<'de> for DownloadState {
                 Ok(DownloadState::Retrying { attempt, max_attempts, wait_secs })
             }
             RawDownloadState::Failed(val) => {
-                // Try parsing as FailureDetails first
+                // Try parsing as FailureDetails first (current format).
                 if let Ok(details) = serde_json::from_value::<FailureDetails>(val.clone()) {
                     return Ok(DownloadState::Failed(details));
                 }
-                // Fallback: legacy format where payload was a bare DownloadRunError
-                if let Ok(err) = serde_json::from_value::<DownloadRunError>(val) {
+                // Fallback: intermediate format where payload was a bare
+                // struct-variant DownloadRunError.
+                if let Ok(err) = serde_json::from_value::<DownloadRunError>(val.clone()) {
+                    return Ok(DownloadState::Failed(FailureDetails::new(err)));
+                }
+                // Fallback: true legacy format where DownloadRunError variants
+                // carried string/unit payloads (pre-error-management rewrite).
+                if let Some(err) = legacy_run_error_from_value(&val) {
                     return Ok(DownloadState::Failed(FailureDetails::new(err)));
                 }
                 Err(serde::de::Error::custom("Invalid Failed state payload"))
             }
         }
+    }
+}
+
+/// Reconstructs a legacy `DownloadRunError` from a JSON value that predates the
+/// struct-variant wire format (e.g. `{"kind":"NetworkError","payload":"connection reset"}`).
+/// Returns `None` if the value does not look like a legacy tagged error.
+fn legacy_run_error_from_value(val: &serde_json::Value) -> Option<DownloadRunError> {
+    let obj = val.as_object()?;
+    let kind = obj.get("kind")?.as_str()?;
+    let payload = obj.get("payload");
+    match kind {
+        "NetworkError" => {
+            let message = payload
+                .and_then(|p| p.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Unknown network error".to_string());
+            Some(DownloadRunError::NetworkError {
+                message,
+                status_code: None,
+            })
+        }
+        "ServerError" => {
+            let message = payload
+                .and_then(|p| p.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Unknown server error".to_string());
+            Some(DownloadRunError::ServerError {
+                message,
+                status_code: None,
+            })
+        }
+        "DiskError" => {
+            let message = payload
+                .and_then(|p| p.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Unknown disk error".to_string());
+            Some(DownloadRunError::DiskError {
+                message,
+                path: None,
+            })
+        }
+        "VerifyError" => Some(DownloadRunError::VerifyError {
+            expected: "unknown".to_string(),
+            actual: "unknown".to_string(),
+        }),
+        "TimeoutError" => Some(DownloadRunError::TimeoutError { secs: 0 }),
+        "AlreadyRunning" => Some(DownloadRunError::AlreadyRunning),
+        _ => None,
     }
 }
 

@@ -2,7 +2,7 @@ use crate::download_data::DownloadData;
 use crate::download_run_error::{DownloadRunError, FailureDetails};
 use crate::download_status::{DownloadState, DownloadStatus};
 use crate::in_place_segment::{InPlaceSegment, SegmentCommand};
-use crate::verifier::VerifierMaybe;
+use crate::verifier::{VerifierMaybe, VerifyError};
 use futures::future::try_join_all;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -139,8 +139,19 @@ impl DownloadItem {
         match verified {
             Ok(true) => {}
             Ok(false) => unreachable!("verify_with_hash returns Err on mismatch"),
-            Err((expected, actual)) => {
+            Err(VerifyError::HashMismatch { expected, actual }) => {
                 let err = DownloadRunError::VerifyError { expected, actual };
+                let details = FailureDetails::new(err.clone());
+                let _ = self
+                    .verify_result_sender
+                    .send(VerificationState::VerifyFailed(details));
+                return Err(err);
+            }
+            Err(VerifyError::IOError(io)) => {
+                let err = DownloadRunError::DiskError {
+                    message: format!("IO error during verification: {}", io),
+                    path: Some(self.filepath.display().to_string()),
+                };
                 let details = FailureDetails::new(err.clone());
                 let _ = self
                     .verify_result_sender

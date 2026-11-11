@@ -100,14 +100,15 @@ impl VerifierMaybe {
         }
     }
 
-    /// Verifies the file and returns the actual computed hash on failure.
-    pub fn verify_with_hash(&self, filepath: &Path) -> Result<bool, (String, String)> {
+    /// Verifies the file and reports the computed hash on mismatch.
+    ///
+    /// Returns `Ok(true)` when verification passes (or no verifier is set),
+    /// `Err(VerifyError::HashMismatch { expected, actual })` on a checksum
+    /// mismatch, and `Err(VerifyError::IOError)` for genuine filesystem
+    /// failures (never panics).
+    pub fn verify_with_hash(&self, filepath: &Path) -> Result<bool, VerifyError> {
         if let Some(verifier) = &self.verifier {
-            match verifier.verify(filepath) {
-                Ok((_expected, _actual)) => Ok(true),
-                Err(VerifyError::HashMismatch { expected, actual }) => Err((expected, actual)),
-                Err(e) => panic!("IO error during verification: {}", e),
-            }
+            verifier.verify(filepath).map(|_| true)
         } else {
             Ok(true)
         }
