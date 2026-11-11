@@ -42,7 +42,7 @@ function summarizeFailureDetails(details: FailureDetails): string {
             summary = "Download is already running";
             break;
         default:
-            summary = error.payload.message ?? "Unknown error";
+            summary = error.payload.message;
     }
     const attempts = details.attempts_made > 0 ? ` · ${details.attempts_made} attempt(s) made` : "";
     return `${summary}${attempts}`;

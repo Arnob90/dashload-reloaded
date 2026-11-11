@@ -21,6 +21,7 @@ import { TableEntry } from "./tableEntry.ts";
 import { Copy, Check, X, FolderOpen, Globe, RotateCcw } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { notifications } from "@mantine/notifications";
+import { useState, useEffect } from "react";
 import type { DownloadRunError, FailureDetails } from "../../code/typesOfBackend.ts";
 
 interface DownloadDetailsPaneProps {
@@ -174,6 +175,22 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
         });
     };
 
+    // Keep the active tab in sync with the download's lifecycle: when a
+    // download fails, open the Error & Diagnostics tab; if it recovers while
+    // that tab is active, fall back to Overview so the pane never renders
+    // blank (the "error" panel is unmounted as soon as `isFailed` flips off).
+    const [activeTab, setActiveTab] = useState<string | null>(null);
+    const currentTab = activeTab ?? defaultTab;
+    useEffect(() => {
+        setActiveTab((prev) => {
+            const tab = prev ?? defaultTab;
+            if (isFailed) {
+                return tab === "error" ? tab : "error";
+            }
+            return tab === "error" ? "overview" : tab;
+        });
+    }, [isFailed]);
+
     const handleReveal = async () => {
         try {
             await revealItemInDir(entry.filepath);
@@ -196,7 +213,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
             }}
             p="md"
         >
-            <Tabs defaultValue={defaultTab} variant="pills" radius="sm">
+            <Tabs value={currentTab} onChange={setActiveTab} variant="pills" radius="sm">
                 {/* Top Header: Tabs on Left, Close (X) on Right */}
                 <Group justify="space-between" mb="sm">
                     <Tabs.List>
