@@ -1,7 +1,7 @@
 ---
 description: System architect that analyzes code, tests, and requirements to produce strict execution plans.
 mode: primary
-model: opencode/deepseek-v4.1-flash-free
+model: freellmapi/auto
 permissions:
   - action: edit
     resource: "*"

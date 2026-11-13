@@ -1,7 +1,7 @@
 ---
 description: Code auditor that analyzes git diffs against original files and stops promptly when code is sound.
 mode: subagent
-model: opencode/glm-5.3-flash-free
+model: freellmapi/auto
 permissions:
   - action: edit
     resource: "*"

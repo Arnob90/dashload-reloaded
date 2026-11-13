@@ -1,7 +1,7 @@
 ---
 description: Implementation specialist that executes plans, commits code, and runs a review loop.
 mode: primary
-model: opencode/deepseek-v4.1-flash-free
+model: freellmapi/auto
 permissions:
   - action: read
     resource: "*"
