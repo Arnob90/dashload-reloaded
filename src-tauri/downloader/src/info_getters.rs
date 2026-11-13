@@ -1,5 +1,6 @@
 use reqwest::header::HeaderMap;
 use serde::Serialize;
+use std::path::Path;
 use thiserror::Error;
 
 /// Errors that can occur when extracting a filename from a remote URL.
@@ -24,10 +25,40 @@ impl From<reqwest::Error> for FilepathGettingError {
     }
 }
 
+/// Strips directory traversal (`../`, `/`, `\`) and replaces OS-illegal characters
+/// so an untrusted string can be safely joined onto a destination directory.
+pub fn sanitize_filename(raw: &str) -> String {
+    // 1. Extract only the final filename component (strips all `/`, `\`, `../`, `C:\`)
+    let base_name = Path::new(raw.trim())
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+
+    // 2. Replace characters forbidden on Windows/macOS/Linux filesystems
+    let cleaned: String = base_name
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | '\0' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+
+    // 3. Strip leading/trailing dots & spaces (Windows hates trailing dots/spaces)
+    let trimmed = cleaned.trim_matches(|c| c == ' ' || c == '.');
+
+    // 4. Fallback if nothing valid remains
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+        "download".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Attempts to determine a suitable filename from the remote URL.
 /// Tries `HEAD` first, falls back to `GET`, and parses `Content-Disposition` header.
 /// Falls back to the last path segment of the URL if no header is present.
-pub async fn get_filename_from_url(
+pub async fn get_filename_from_url_unsanitized(
     client: reqwest::Client,
     url: &str,
 ) -> Result<String, FilepathGettingError> {
@@ -62,6 +93,14 @@ pub async fn get_filename_from_url(
         return result_or_err;
     }
     Err(FilepathGettingError::Filenameless)
+}
+
+pub async fn get_filename_from_url(
+    client: reqwest::Client,
+    url: &str,
+) -> Result<String, FilepathGettingError> {
+    let unsanitized = get_filename_from_url_unsanitized(client, url).await?;
+    Ok(sanitize_filename(&unsanitized))
 }
 
 /// Fetches the `Content-Length` header via `HEAD` request to determine file size.
