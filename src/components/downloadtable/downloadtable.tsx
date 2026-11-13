@@ -273,7 +273,7 @@ export function DownloadTable() {
                 header: "Downloaded",
                 size: 100,
                 cell: (info) => (
-                    <Text ta="right">
+                    <Text>
                         {info.getValue() != null
                             ? `${bytesToMIB(info.getValue()).toFixed(1)} MiB`
                             : "-"}
@@ -284,7 +284,7 @@ export function DownloadTable() {
                 header: "Total",
                 size: 100,
                 cell: (info) => (
-                    <Text ta="right">
+                    <Text>
                         {info.getValue() != null
                             ? `${bytesToMIB(info.getValue()!).toFixed(1)} MiB`
                             : "-"}
@@ -295,7 +295,7 @@ export function DownloadTable() {
                 header: "Speed",
                 size: 110,
                 cell: (info) => (
-                    <Text ta="right">
+                    <Text>
                         {info.getValue() != null
                             ? `${bytesToMIB(info.getValue()!).toFixed(2)} MiB/s`
                             : "-"}
@@ -339,7 +339,7 @@ export function DownloadTable() {
                 header: "ETA",
                 size: 110,
                 cell: (info) => (
-                    <Text ta="right">
+                    <Text>
                         {info.getValue() != null ? formatTime(info.getValue()!) : "-"}
                     </Text>
                 ),
