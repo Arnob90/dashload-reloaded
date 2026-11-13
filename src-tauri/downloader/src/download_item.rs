@@ -294,5 +294,19 @@ impl DownloadItem {
     }
     pub async fn stop(&self) {
         let _ = self.segment_command_sender.send(SegmentCommand::Stop);
+        // When a download is already paused, the segment workers have exited
+        // and won't process the Stop command. Force the state to Stopped and
+        // remove the partial file so the UI reflects the user's intent.
+        let current = self.get_status();
+        if matches!(current.state, DownloadState::Paused) {
+            for segment in &self.segments {
+                let _ = segment.sender.send(DownloadStatus {
+                    total: current.total,
+                    downloaded: current.downloaded,
+                    state: DownloadState::Stopped,
+                });
+            }
+            let _ = tokio::fs::remove_file(&self.filepath).await;
+        }
     }
 }

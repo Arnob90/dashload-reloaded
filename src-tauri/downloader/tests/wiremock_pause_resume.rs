@@ -445,6 +445,50 @@ async fn stop_after_reconstruct_completes() {
     cleanup_file(&path).await;
 }
 
+/// Test: stopping a paused download transitions it to Stopped even though
+/// the segment workers have already exited and won't process the command.
+#[tokio::test]
+async fn test_stop_paused_download_transitions_to_stopped() {
+    let mock_server = setup_pause_resume_mock_server().await;
+    let client = reqwest::Client::new();
+    let manager = DownloadManager::new(client, 100);
+    let path = temp_filepath("wiremock_stop_paused");
+
+    let id = manager
+        .add_download(
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(VerifierMaybe::none())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
+        )
+        .await
+        .expect("Failed to add download");
+
+    // Let it run briefly, then pause.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    manager.pause(&id).expect("Failed to pause");
+    wait_for_state(&manager, &id, DownloadState::Paused, 10_000).await;
+
+    // Stop the paused download. Before the fix, this was a no-op and the
+    // download stayed Paused forever.
+    manager.stop(&id).await.expect("Failed to stop paused download");
+
+    let status = manager.get_item_status(&id).unwrap();
+    assert!(
+        matches!(status.state, DownloadState::Stopped),
+        "paused download should transition to Stopped after stop(), got {:?}",
+        status.state
+    );
+    assert!(
+        !manager.runner_handles.contains_key(&id),
+        "runner handle should be removed after stop"
+    );
+    assert!(!path.exists(), "stopped download file should be removed");
+
+    cleanup_file(&path).await;
+}
+
 /// Test: `DownloadManager::delete` stops the running download, removes the runner handle, and removes the item from download_items.
 #[tokio::test]
 async fn test_delete_download_stops_and_removes_item() {
