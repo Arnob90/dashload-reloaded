@@ -1,4 +1,4 @@
-use tauri::Manager;
+use tauri::{tray::TrayIconBuilder, menu::{Menu, MenuItem}, image::Image, Manager};
 mod commands;
 mod config_file;
 mod events;
@@ -75,18 +75,58 @@ pub fn run() {
                 config: cfg,
             });
 
+            // ── System Tray ─────────────────────────────────────────────────────
+            let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+            let tray_icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))
+                .expect("Failed to load tray icon bytes");
+
+            let _tray = TrayIconBuilder::with_id("main-tray")
+                .icon(tray_icon)
+                .menu(&menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(|tray, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        let app_handle = tray.app_handle().clone();
+                        let session_path = get_session_file_path(&app_handle).ok();
+                        tauri::async_runtime::spawn(async move {
+                            if let Some(session_path) = session_path {
+                                let state = app_handle.state::<AppState>();
+                                let _ = state.download_manager.save_session(&session_path).await;
+                            }
+                            app_handle.exit(0);
+                        });
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Auto-save session on close
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Auto-save session before hiding to tray
                 let app_handle = window.app_handle().clone();
-                tauri::async_runtime::block_on(async move {
-                    if let Ok(session_path) = get_session_file_path(&app_handle) {
+                let session_path = get_session_file_path(&app_handle).ok();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(session_path) = session_path {
                         let state = app_handle.state::<AppState>();
                         let _ = state.download_manager.save_session(&session_path).await;
                     }
                 });
+
+                // Prevent the window from closing; hide it to the tray instead
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .invoke_handler(commands::get_handlers())
