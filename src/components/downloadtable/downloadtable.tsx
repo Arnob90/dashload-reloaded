@@ -211,9 +211,9 @@ export function DownloadTable() {
             columnHelper.accessor("filename", {
                 header: "Filename",
                 cell: (info) => (
-                    <Group gap="xs" wrap="nowrap">
+                    <Group gap="xs" wrap="nowrap" style={{ width: "100%", minWidth: 0 }}>
                         {getFileIcon(info.getValue())}
-                        <Text size="sm" fw={500} truncate maw={300}>
+                        <Text size="sm" fw={500} truncate w="100%" style={{ minWidth: 0 }}>
                             {info.getValue()}
                         </Text>
                     </Group>
@@ -273,7 +273,7 @@ export function DownloadTable() {
                 header: "Downloaded",
                 size: 100,
                 cell: (info) => (
-                    <Text>
+                    <Text ta="right">
                         {info.getValue() != null
                             ? `${bytesToMIB(info.getValue()).toFixed(1)} MiB`
                             : "-"}
@@ -284,7 +284,7 @@ export function DownloadTable() {
                 header: "Total",
                 size: 100,
                 cell: (info) => (
-                    <Text>
+                    <Text ta="right">
                         {info.getValue() != null
                             ? `${bytesToMIB(info.getValue()!).toFixed(1)} MiB`
                             : "-"}
@@ -295,7 +295,7 @@ export function DownloadTable() {
                 header: "Speed",
                 size: 110,
                 cell: (info) => (
-                    <Text>
+                    <Text ta="right">
                         {info.getValue() != null
                             ? `${bytesToMIB(info.getValue()!).toFixed(2)} MiB/s`
                             : "-"}
@@ -337,8 +337,9 @@ export function DownloadTable() {
             }),
             columnHelper.accessor("eta", {
                 header: "ETA",
+                size: 110,
                 cell: (info) => (
-                    <Text>
+                    <Text ta="right">
                         {info.getValue() != null ? formatTime(info.getValue()!) : "-"}
                     </Text>
                 ),
@@ -366,12 +367,12 @@ export function DownloadTable() {
         <Flex direction="column" h="100%" flex="1" style={{ overflow: "hidden" }}>
             {/* 1. Main Table (Takes remaining flex height) */}
             <Box style={{ flex: 1, overflowY: "auto" }}>
-                <SelectableItemsTable setSelectedId={setSelectedId} verticalSpacing="sm" horizontalSpacing="md" highlightOnHover style={{ tableLayout: "auto" }}>
+                <SelectableItemsTable setSelectedId={setSelectedId} verticalSpacing="sm" horizontalSpacing="md" highlightOnHover style={{ tableLayout: "fixed" }} styles={{ table: { fontVariantNumeric: "tabular-nums" } }}>
                     <Table.Thead className={style.sticky_thead}>
                         {tableModel.getHeaderGroups().map((headerGroup) => (
                             <Table.Tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
-                                    <Table.Th key={header.id}>
+                                    <Table.Th key={header.id} style={{ width: header.column.getSize() }}>
                                         <Text size="xs" fw={700} c="dimmed" tt="uppercase">
                                             {header.isPlaceholder
                                                 ? null
