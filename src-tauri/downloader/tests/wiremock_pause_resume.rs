@@ -447,6 +447,10 @@ async fn stop_after_reconstruct_completes() {
 
 /// Test: stopping a paused download transitions it to Stopped even though
 /// the segment workers have already exited and won't process the command.
+///
+/// Uses multiple segments to verify that the forcing path echoes each
+/// segment's *own* status back (not the aggregate), so per-segment
+/// `last_downloaded` values remain correct after the stop.
 #[tokio::test]
 async fn test_stop_paused_download_transitions_to_stopped() {
     let mock_server = setup_pause_resume_mock_server().await;
@@ -457,7 +461,7 @@ async fn test_stop_paused_download_transitions_to_stopped() {
     let id = manager
         .add_download(
             DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
-                .with_segments(1)
+                .with_segments(4)
                 .with_verifier(VerifierMaybe::none())
                 .with_headers(default_test_headers())
                 .with_retry(default_retry_scheme()),
@@ -468,7 +472,19 @@ async fn test_stop_paused_download_transitions_to_stopped() {
     // Let it run briefly, then pause.
     tokio::time::sleep(Duration::from_millis(200)).await;
     manager.pause(&id).expect("Failed to pause");
-    wait_for_state(&manager, &id, DownloadState::Paused, 10_000).await;
+    let paused = wait_for_state(&manager, &id, DownloadState::Paused, 10_000).await;
+
+    // Capture per-segment progress before stopping so we can assert it is
+    // preserved (not inflated by broadcasting the aggregate into every
+    // segment's channel).
+    let snapshot = manager.get_full_snapshot();
+    let pre_stop_downloaded: Vec<u64> = snapshot
+        .get(&id)
+        .unwrap()
+        .segments
+        .iter()
+        .map(|s| s.last_downloaded)
+        .collect();
 
     // Stop the paused download. Before the fix, this was a no-op and the
     // download stayed Paused forever.
@@ -480,11 +496,31 @@ async fn test_stop_paused_download_transitions_to_stopped() {
         "paused download should transition to Stopped after stop(), got {:?}",
         status.state
     );
+    // Aggregate must equal the true sum of per-segment values, not N× the sum.
+    let expected_total: u64 = pre_stop_downloaded.iter().sum();
+    assert_eq!(
+        status.downloaded, expected_total,
+        "aggregate downloaded must equal the true per-segment sum"
+    );
     assert!(
         !manager.runner_handles.contains_key(&id),
         "runner handle should be removed after stop"
     );
     assert!(!path.exists(), "stopped download file should be removed");
+
+    // Persisted per-segment offsets must remain the true pre-stop values.
+    let after_snapshot = manager.get_full_snapshot();
+    let after_downloaded: Vec<u64> = after_snapshot
+        .get(&id)
+        .unwrap()
+        .segments
+        .iter()
+        .map(|s| s.last_downloaded)
+        .collect();
+    assert_eq!(
+        after_downloaded, pre_stop_downloaded,
+        "per-segment last_downloaded must be preserved after stop"
+    );
 
     cleanup_file(&path).await;
 }
