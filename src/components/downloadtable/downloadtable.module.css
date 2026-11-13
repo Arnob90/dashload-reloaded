@@ -24,6 +24,21 @@
 	cursor: pointer;
 }
 
+.stop_download_menu_item {
+	color: var(--mantine-color-orange-7);
+	transition: background-color 100ms ease, color 100ms ease;
+}
+
+/* When hovered: solid orange background with high-contrast text/icon */
+.stop_download_menu_item:hover {
+	background-color: var(--mantine-color-orange-6) !important;
+	color: #ffffff !important;
+}
+
+.stop_download_menu_item:hover svg {
+	stroke: #ffffff !important;
+}
+
 .delete_menu_item {
 	color: var(--mantine-color-red-5);
 	transition: background-color 100ms ease, color 100ms ease;

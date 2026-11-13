@@ -18,9 +18,10 @@ import {
     useResumeDownload,
     useDeleteDownload,
     useRetryDownload,
+    useStopDownload
 } from "../../code/useDownloads.ts";
 import { notifications } from "@mantine/notifications";
-import { ChevronRight, FolderOpen, Pause, Trash, FileArchive, FileCode, File as DefaultFile, RotateCcw, CircleAlert } from "lucide-react";
+import { ChevronRight, SquareStop, FolderOpen, Pause, Trash, FileArchive, FileCode, File as DefaultFile, RotateCcw, CircleAlert } from "lucide-react";
 import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener"
 import { useTableEntries, TableEntry } from "./tableEntry.ts";
 import { formatTime } from "../../code/utils.ts";
@@ -74,6 +75,7 @@ export function DownloadTable() {
     const { mutate: resumeDownload } = useResumeDownload();
     const { mutate: deleteDownload } = useDeleteDownload();
     const { mutate: retryDownload } = useRetryDownload();
+    const { mutate: stopDownload } = useStopDownload();
     const [sorting, setSorting] = useState<SortingState>([])
     const handleOpenInFileManager = (path: string) => {
         revealItemInDir(path)
@@ -138,6 +140,17 @@ export function DownloadTable() {
             },
         });
     }, [deleteDownload]);
+    const handleStop = useCallback((id: string) => {
+        stopDownload(id, {
+            onError: (err) => {
+                notifications.show({
+                    title: "Failed to Stop",
+                    message: err.message,
+                    color: "red",
+                });
+            }
+        });
+    }, [stopDownload]);
     const columns = useMemo(
         () => columnHelper.columns([
             columnHelper.display({
@@ -308,12 +321,12 @@ export function DownloadTable() {
                         <Group gap="xs" wrap="nowrap" justify="center" mx="auto" style={{ width: "100%", maxHeight: 220 }}>
                             <Progress
                                 value={pct}
-                                size="md" // 👈 8px thickness instead of 4px
-                                radius="xl" // 👈 Smooth pill corners
+                                size="md" // 8px thickness instead of 4px
+                                radius="xl" // Smooth pill corners
                                 color={color}
                                 striped={pct < 100 && pct > 0 && kind !== "Failed"}
                                 animated={pct < 100 && pct > 0 && kind !== "Failed"}
-                                style={{ flex: 1 }} // 👈 Automatically fills the available column space
+                                style={{ flex: 1 }} // Automatically fills the available column space
                             />
                             <Text size="xs" fw={600} w={38} ta="right" c={pct === 100 ? "teal" : undefined}>
                                 {pct}%
@@ -331,7 +344,7 @@ export function DownloadTable() {
                 ),
             }),
         ]),
-        [handlePause, handleResume, handleRetry]
+        [handlePause, handleResume, handleRetry, handleStop]
     );
 
     const tableModel = useTable({
@@ -413,6 +426,9 @@ export function DownloadTable() {
                                     >
                                         Open in File Manager
                                     </Menu.Item>
+                                    <Menu.Item leftSection={<SquareStop size={16} />} className={style.stop_download_menu_item} onClick={() => handleStop(row.original.id)}>
+                                        Stop Download
+                                    </Menu.Item>
                                     <Menu.Item leftSection={<Trash size={16} />} className={style.delete_menu_item} onClick={() => handleDelete(row.original.id)}>
                                         Delete
                                     </Menu.Item>
@@ -425,6 +441,6 @@ export function DownloadTable() {
 
             {/* 2. FDM-Style Bottom Details Pane */}
             {selectedEntry && <DownloadDetailsPane entry={selectedEntry} onClose={() => setSelectedId(null)} />}
-        </Flex>
+        </Flex >
     );
 }

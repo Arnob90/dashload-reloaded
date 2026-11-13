@@ -15,6 +15,7 @@ import {
     getItemStatus,
     saveSession,
     deleteDownload,
+    stopDownload,
 } from "./apiCommunicate.ts"; // Your invoke file
 import { getConfigFile } from "./defaults.ts";
 import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, RequestHeaders, DownloadOptions } from "./typesOfBackend";
@@ -185,6 +186,22 @@ export function useDeleteDownload() {
 
     return useMutation({
         mutationFn: (id: string) => deleteDownload(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: downloadKeys.all });
+        },
+    });
+}
+
+
+/**
+ * Stops a download by ID (stops it, and
+ * invalidates the status query cache).
+ */
+export function useStopDownload() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (id: string) => stopDownload(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: downloadKeys.all });
         },

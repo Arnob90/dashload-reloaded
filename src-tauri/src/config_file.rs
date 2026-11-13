@@ -5,6 +5,7 @@ use std::path::PathBuf;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     pub auto_add_download: bool,
+    #[serde(default)]
     pub default_download_path: PathBuf,
     pub default_number_of_segments: u64,
     /// Retry policy applied to new downloads. Defaults when absent from an

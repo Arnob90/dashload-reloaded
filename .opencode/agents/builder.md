@@ -38,3 +38,7 @@ Whenever you execute a task:
 
 - Do not bypass `@reviewer` after committing code.
 - If a review cycles more than 3 times on minor stylistic points, break the loop and ask the user for confirmation.
+
+### More notes
+
+- Use bun to do stuff

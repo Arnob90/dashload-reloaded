@@ -45,6 +45,12 @@ export let DEFAULT_REQUEST_HEADERS: RequestHeaders = FALLBACK_REQUEST_HEADERS;
  */
 export let DEFAULT_RETRY_SCHEME: RetryScheme = FALLBACK_RETRY_SCHEME;
 
+/**
+ * Default download path used by the download form.
+ * Replaced with the config file's `default_download_path` during initialization.
+ */
+export let DEFAULT_DOWNLOAD_PATH: string = "";
+
 /** Fetches and validates the backend config file. */
 export async function getConfigFile(): Promise<Config> {
     const res = await invoke("get_config_file");
@@ -60,6 +66,7 @@ export async function initConfigFile(): Promise<Config> {
     CONFIG = config;
     DEFAULT_REQUEST_HEADERS = config.request_headers;
     DEFAULT_RETRY_SCHEME = config.retry_scheme;
+    DEFAULT_DOWNLOAD_PATH = config.default_download_path;
     return config;
 }
 

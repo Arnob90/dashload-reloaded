@@ -124,6 +124,11 @@ async fn delete_download(
     Ok(())
 }
 
+#[tauri::command]
+async fn stop_download(state: State<'_, AppState>, id: &str) -> Result<(), ApiError<ManagerError>> {
+    state.download_manager.stop(id).await?;
+    Ok(())
+}
 pub fn get_handlers() -> impl Fn(Invoke<tauri::Wry>) -> bool {
     tauri::generate_handler![
         add_download,
@@ -137,6 +142,7 @@ pub fn get_handlers() -> impl Fn(Invoke<tauri::Wry>) -> bool {
         get_data,
         save_session,
         delete_download,
-        get_config_file
+        get_config_file,
+        stop_download
     ]
 }

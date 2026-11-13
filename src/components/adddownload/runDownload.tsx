@@ -4,7 +4,7 @@ import { Folder } from "lucide-react";
 import { MoreInfo } from "./moreInfo.tsx";
 import { useAddDownload, useOpenFile } from "../../code/useDownloads.ts";
 import { DownloadInfo, VerifierMaybe, HashAlgo, RequestHeaders, DownloadOptions } from "../../code/typesOfBackend.ts";
-import { DEFAULT_RETRY_SCHEME } from "../../code/defaults.ts";
+import { DEFAULT_RETRY_SCHEME, DEFAULT_DOWNLOAD_PATH } from "../../code/defaults.ts";
 import { joinPaths } from "../../code/utils.ts";
 import { notifications } from "@mantine/notifications";
 import { AdvancedOptions } from "./advancedOptions.tsx";
@@ -17,7 +17,7 @@ export interface RunDownloadDialogProps {
 }
 
 export function RunDownloadDialog({ metadata, onSuccess, headers, setHeaders }: RunDownloadDialogProps) {
-    const [filepathToDownloadTo, setFilepathToDownloadTo] = useState("");
+    const [filepathToDownloadTo, setFilepathToDownloadTo] = useState(DEFAULT_DOWNLOAD_PATH);
     const [filename, setFilename] = useState(metadata.filename ?? "");
     const [numberOfSegments, setNumberOfSegments] = useState(metadata.segmented_possible ? 4 : 1);
     const [chosenAlgo, setChosenAlgo] = useState<HashAlgo | null>(null)
