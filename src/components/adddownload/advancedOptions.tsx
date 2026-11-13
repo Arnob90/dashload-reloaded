@@ -29,7 +29,7 @@ export function AdvancedOptions({
             toggleFunction={toggle}
             opened={expanded}
         >
-            <Paper withBorder p="md" radius="sm" bg="dark.7">
+            <Paper withBorder p="md" radius="md" bg="dark.8">
                 <RequestHeadersSection
                     requestHeaders={requestHeaders}
                     setRequestHeaders={setRequestHeaders}

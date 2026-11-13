@@ -201,15 +201,17 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
 
     return (
         <Paper
-            withBorder
-            h={260} // 👈 Increased height for comfortable breathing room
-            bg="dark.7" // 👈 Distinct dark-panel elevation
+            h={260}
             radius={0}
             style={{
-                borderTop: "1px solid var(--mantine-color-dark-4)",
+                background: "rgba(24, 26, 32, 0.75)",
+                backdropFilter: "blur(16px)",
+                WebkitBackdropFilter: "blur(16px)",
+                borderTop: "1px solid rgba(255, 255, 255, 0.08)",
                 borderLeft: "none",
                 borderRight: "none",
                 borderBottom: "none",
+                boxShadow: "0 -8px 24px rgba(0, 0, 0, 0.4)",
             }}
             p="md"
         >
@@ -286,7 +288,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                     {/* Structured 2-Column Cards for URL & Filepath */}
                     <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
                         {/* Download URL Box */}
-                        <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                        <Paper withBorder p="xs" radius="md" shadow="xs" bg="dark.7">
                             <Text size="xs" fw={600} c="dimmed" mb={4}>
                                 DOWNLOAD URL
                             </Text>
@@ -310,7 +312,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                         </Paper>
 
                         {/* Save Location Box */}
-                        <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                        <Paper withBorder p="xs" radius="md" shadow="xs" bg="dark.7">
                             <Text size="xs" fw={600} c="dimmed" mb={4}>
                                 SAVE LOCATION
                             </Text>
@@ -335,7 +337,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                 {isFailed && (
                     <Tabs.Panel value="error">
                         <Stack gap="sm">
-                            <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                            <Paper withBorder p="xs" radius="md" shadow="xs" bg="dark.7">
                                 <Text size="xs" fw={600} c="dimmed" mb={2}>
                                     FAILURE CATEGORY
                                 </Text>
@@ -344,7 +346,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                                 </Badge>
                             </Paper>
 
-                            <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                            <Paper withBorder p="xs" radius="md" shadow="xs" bg="dark.7">
                                 <Text size="xs" fw={600} c="dimmed" mb={2}>
                                     FAILURE MESSAGE
                                 </Text>
@@ -355,7 +357,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
 
                             {entry.failureDetails!.error.kind === "DiskError" &&
                                 entry.failureDetails!.error.payload.path && (
-                                    <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                    <Paper withBorder p="xs" radius="md" shadow="xs" bg="dark.7">
                                         <Text size="xs" fw={600} c="dimmed" mb={2}>
                                             AFFECTED PATH
                                         </Text>
@@ -366,7 +368,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                                 )}
 
                             {entry.failureDetails!.error.kind === "VerifyError" && (
-                                <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                <Paper withBorder p="xs" radius="md" shadow="xs" bg="dark.7">
                                     <Text size="xs" fw={600} c="dimmed" mb={2}>
                                         CHECKSUM MISMATCH
                                     </Text>
@@ -379,7 +381,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                                 </Paper>
                             )}
 
-                            <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                            <Paper withBorder p="xs" radius="md" shadow="xs" bg="dark.7">
                                 <Text size="xs" fw={600} c="dimmed" mb={2}>
                                     SUGGESTED ACTION
                                 </Text>
@@ -389,7 +391,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                             </Paper>
 
                             <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="xs">
-                                <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                <Paper withBorder p="xs" radius="md" shadow="xs" bg="dark.7">
                                     <Text size="xs" fw={600} c="dimmed" mb={2}>
                                         FAILED AT
                                     </Text>
@@ -401,7 +403,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                                             : "unknown"}
                                     </Text>
                                 </Paper>
-                                <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                <Paper withBorder p="xs" radius="md" shadow="xs" bg="dark.7">
                                     <Text size="xs" fw={600} c="dimmed" mb={2}>
                                         FAILED SEGMENT
                                     </Text>
@@ -411,7 +413,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                                             : "unknown"}
                                     </Text>
                                 </Paper>
-                                <Paper withBorder p="xs" radius="sm" bg="dark.8">
+                                <Paper withBorder p="xs" radius="md" shadow="xs" bg="dark.7">
                                     <Text size="xs" fw={600} c="dimmed" mb={2}>
                                         ATTEMPTS MADE
                                     </Text>

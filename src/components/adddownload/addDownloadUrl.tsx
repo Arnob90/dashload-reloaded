@@ -42,9 +42,25 @@ export function AddDownloadUrl({ submitMetadata, error: err }: AddDownloadProps)
                 }}
             >
                 <Flex direction="column" gap="xs">
-                    <Input type="url" placeholder="Url" value={url} onChange={(e) => setUrl(e.target.value)} />
+                    <Input
+            type="url"
+            placeholder="Url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            variant="filled"
+            radius="md"
+            styles={{
+                input: {
+                    backgroundColor: "rgba(255, 255, 255, 0.05)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    transition: "border-color 150ms ease, background-color 150ms ease",
+                },
+            }}
+        />
                     {err?.payload && <Text c={"red"}>{err.payload}</Text>}
-                    <Button type="submit">Download</Button>
+                    <Button type="submit" variant="filled" color="indigo" radius="md" fullWidth>
+            Download
+        </Button>
                 </Flex>
                 <CollapseSection label="Advanced Options" toggleFunction={toggle} opened={expanded}>
                     <RequestHeadersSection requestHeaders={requestHeaders} setRequestHeaders={setRequestHeaders} />

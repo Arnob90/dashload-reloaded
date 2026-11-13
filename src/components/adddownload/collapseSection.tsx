@@ -21,7 +21,7 @@ export function CollapseSection({ label, children, toggleFunction, opened }: Col
                 style={{ borderRadius: 6 }}
             />
             <Collapse expanded={opened}>
-                <Paper withBorder p="md" radius="sm" bg="dark.7">
+                <Paper withBorder p="md" radius="md" bg="dark.8">
                     {children}
                 </Paper>
             </Collapse>

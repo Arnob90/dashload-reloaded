@@ -367,7 +367,7 @@ export function DownloadTable() {
             {/* 1. Main Table (Takes remaining flex height) */}
             <Box style={{ flex: 1, overflowY: "auto" }}>
                 <SelectableItemsTable setSelectedId={setSelectedId} verticalSpacing="sm" horizontalSpacing="md" highlightOnHover style={{ tableLayout: "auto" }}>
-                    <Table.Thead bg="dark.8">
+                    <Table.Thead className={style.sticky_thead}>
                         {tableModel.getHeaderGroups().map((headerGroup) => (
                             <Table.Tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (

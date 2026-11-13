@@ -28,7 +28,7 @@ export function MoreInfo({ filename, filesize, segmentedPossible }: MoreInfoProp
 
             {/* Styled Details Card */}
             <Collapse expanded={expanded}>
-                <Paper withBorder p="sm" radius="sm" bg="dark.7">
+                <Paper withBorder p="sm" radius="md" bg="dark.8">
                     <Flex direction="column" gap="xs">
                         <Group justify="space-between">
                             <Text size="xs" c="dimmed">Source File:</Text>

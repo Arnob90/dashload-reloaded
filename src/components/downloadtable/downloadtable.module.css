@@ -1,27 +1,41 @@
+/* Sticky header */
+.sticky_thead th {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	background: #0b0d12;
+	backdrop-filter: blur(8px);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 /* Base Row */
 .table_row {
-	transition: background-color 0.15s ease-in-out;
+	transition: background-color 150ms ease;
 	cursor: pointer;
 	outline: none;
 }
 
 /* Hover state */
 .table_row:hover td {
-	background-color: var(--mantine-color-dark-6);
+	background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* 1. Permanently remove browser focus rings on all states */
-.table_row:focus,
+/* Keyboard focus visible */
 .table_row:focus-visible,
-.selected_row:focus,
 .selected_row:focus-visible {
-	outline: none !important;
+	outline: 2px solid var(--mantine-color-indigo-5);
+	outline-offset: -2px;
 }
 
-/* 2. Style selected row cleanly across all table cells */
+/* Selected row with accent bar */
 .selected_row td {
-	background-color: var(--mantine-color-dark-5) !important;
+	background-color: rgba(99, 102, 241, 0.1) !important;
+	transition: background-color 150ms ease;
 	cursor: pointer;
+}
+
+.selected_row td:first-child {
+	box-shadow: inset 3px 0 0 var(--mantine-color-indigo-6);
 }
 
 .stop_download_menu_item {

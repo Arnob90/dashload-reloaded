@@ -136,7 +136,7 @@ export function RunDownloadDialog({ metadata, onSuccess, headers, setHeaders }: 
                         filesize={metadata.filesize ? `${(metadata.filesize / 1024 / 1024).toFixed(1)} MiB` : "Unknown"}
                         segmentedPossible={metadata.segmented_possible}
                     />
-                    <Button type="submit" fullWidth mt="xs">
+                    <Button type="submit" fullWidth mt="xs" variant="filled" color="indigo" radius="md" fw={600}>
                         Start Download
                     </Button>
                 </Flex>
