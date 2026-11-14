@@ -1,7 +1,8 @@
-import { Button, Flex, TextInput } from "@mantine/core"
+import { Button, Flex, Menu, TextInput } from "@mantine/core"
 import styles from "./header.module.css"
-import { Plus, Search } from "lucide-react"
+import { Plus, Search, Settings } from "lucide-react"
 import { useState } from "react";
+import { SettingsMenu } from "../settingsmenu/settingsmenu";
 
 export interface DownloadHeaderProps {
     onClickAddDownload?: () => void;
@@ -47,6 +48,16 @@ export function DownloadHeader({ onClickAddDownload, onClickSearch }: DownloadHe
                         },
                     }}
                 />
+                <Menu position="bottom-end" withinPortal>
+                    <Menu.Target>
+                        <Button variant="subtle" radius="xl" p="xs">
+                            <Settings size={18} />
+                        </Button>
+                    </Menu.Target>
+                    <Menu.Dropdown w={360} p="md">
+                        <SettingsMenu />
+                    </Menu.Dropdown>
+                </Menu>
             </Flex>
             <div className={styles.separator}></div>
         </Flex>
