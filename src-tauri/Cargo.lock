@@ -252,6 +252,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-time"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3736667d57e279e7e7bdc595a00f1f3a2e124a68bf9f08ce12be5327dcd2848e"
+dependencies = [
+ "portable-atomic",
+ "serde",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -895,6 +905,7 @@ name = "dashload-downloader"
 version = "0.2.0"
 dependencies = [
  "async-trait",
+ "atomic-time",
  "axum",
  "bytes",
  "content_disposition",
