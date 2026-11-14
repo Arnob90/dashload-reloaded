@@ -1,0 +1,10 @@
+# Place at <project_root>/.cargo/config.toml (or ~/.cargo/config.toml)
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold", "--cfg", "tokio_unstable"]
+# Keep full debug symbols for YOUR code, strip them from 400 third-party crates!
+[profile.dev]
+debug = "line-tables-only" # Faster linking while keeping stack trace line numbers
+
+[profile.dev.package."*"]
+debug = false # Shrinks the debug binary by ~80% -> huge linker speedup

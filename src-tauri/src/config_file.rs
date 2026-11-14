@@ -1,9 +1,8 @@
 use downloader::request_headers::RequestHeaders;
 use downloader::retry_scheme::RetryScheme;
+use std::time::Duration; 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::time::Duration;
-use jiff::fmt::serde::unsigned_duration::friendly::compact;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     pub auto_add_download: bool,
@@ -17,8 +16,7 @@ pub struct Config {
     #[serde(default)]
     pub request_headers: RequestHeaders,
     /// Polling interval for status updates. Serialized as human-friendly duration.
-    #[serde(default)]
-    #[serde(with = "compact::required")]
+    #[serde(with = "humantime_serde")]
     pub polling_rate: Duration,
 }
 
