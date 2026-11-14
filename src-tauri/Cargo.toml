@@ -27,3 +27,5 @@ tauri-plugin-dialog = "2"
 reqwest = "0.13"
 confy = { version = "2.0.0", features = ["toml_conf"] }
 dirs = "7.0.0"
+jiff = { version = "0.2.43", features = ["serde"] }
+atomic-time = "1.0.0"

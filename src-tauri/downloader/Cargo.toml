@@ -25,7 +25,7 @@ url = "2.5.7"
 uuid = { version = "1.18.1", features = ["v4"] }
 log = "0.4.28"
 atomic-time = { version = "1.0.0", features = ["serde"] }
-humantime = "2.4.0"
+jiff = { version = "0.2.43", features = ["serde"] }
 
 [dev-dependencies]
 test-log = "0.2.18"

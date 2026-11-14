@@ -27,6 +27,7 @@ pub struct AppState {
     pub client: reqwest::Client,
     pub download_manager: DownloadManager,
     pub config: watch::Sender<crate::config_file::Config>,
+    pub config_rx: watch::Receiver<crate::config_file::Config>,
 }
 
 #[tauri::command]
@@ -39,8 +40,11 @@ async fn set_config_file(
         eprintln!("Warning: Failed to save config file: {:?}", e);
         return Err(());
     }
-    // Broadcast the new config to any watchers.
-    let _ = state.config.send(config);
+    // Broadcast the new config to any watchers and update polling interval.
+    let _ = state.config.send(config.clone());
+    // Hot-swap the DownloadManager polling interval when config changes.
+    let poll_ms = config.polling_rate.as_millis() as u64;
+    let _ = state.download_manager.set_poll_every(poll_ms);
     Ok(())
 }
 
@@ -147,6 +151,7 @@ async fn stop_download(state: State<'_, AppState>, id: &str) -> Result<(), ApiEr
     state.download_manager.stop(id).await?;
     Ok(())
 }
+
 pub fn get_handlers() -> impl Fn(Invoke<tauri::Wry>) -> bool {
     tauri::generate_handler![
         add_download,

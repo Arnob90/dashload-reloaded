@@ -63,7 +63,7 @@ pub fn run() {
                     crate::config_file::Config::default()
                 }
             };
-            let (config_tx, _config_rx) = tokio::sync::watch::channel(cfg);
+            let (config_tx, config_rx) = tokio::sync::watch::channel(cfg);
             let handle_clone = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 events::start_server(handle_clone).await;
@@ -74,6 +74,7 @@ pub fn run() {
                 client,
                 download_manager,
                 config: config_tx,
+                config_rx,
             });
 
             // ── System Tray ─────────────────────────────────────────────────────
