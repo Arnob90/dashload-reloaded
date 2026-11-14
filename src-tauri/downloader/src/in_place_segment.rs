@@ -4,10 +4,12 @@ use crate::info_getters::get_filesize;
 use crate::request_headers::RequestHeaders;
 use crate::retry_scheme::RetryScheme;
 use crate::segmented_verifier::SegmentVerificationError;
+use atomic_time::{AtomicDuration, Ordering};
 use bytes::Bytes;
 use reqwest::{Client, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::watch;
 use tokio::time::{Duration, Instant};
@@ -100,8 +102,8 @@ pub struct InPlaceSegment {
     pub sender: watch::Sender<DownloadStatus>,
     /// HTTP client used for chunk requests.
     pub client: Client,
-    /// Polling interval in milliseconds for progress/speed updates.
-    pub polling_rate: u64,
+    /// Shared, atomically-updatable polling interval.
+    pub polling_rate: Arc<AtomicDuration>,
     /// Watch receiver for incoming segment control commands (pause/stop).
     pub command_reciever: watch::Receiver<SegmentCommand>,
     /// Retry scheme for download
@@ -130,13 +132,13 @@ impl InPlaceSegment {
     /// # Arguments
     /// * `client` - Shared reqwest client.
     /// * `given_data` - Segment definition data.
-    /// * `polling_rate` - Progress update interval in milliseconds.
+    /// * `polling_rate` - Shared, atomically-updatable polling interval.
     /// * `command_reciever` - Watch channel for pause/stop commands.
     /// * `prev_state` - Initial download state (typically Running).
     pub async fn new(
         client: reqwest::Client,
         given_data: InPlaceSegmentData,
-        polling_rate: u64,
+        polling_rate: Arc<AtomicDuration>,
         command_reciever: watch::Receiver<SegmentCommand>,
         prev_state: DownloadState,
         retry_scheme: RetryScheme,
@@ -210,7 +212,7 @@ impl InPlaceSegment {
         total_size: Option<u64>,
         chunk_wait_timeout: Duration,
     ) -> Result<StreamChunkResult, DownloadRunError> {
-        let polling_time = Duration::from_millis(self.polling_rate);
+        let polling_time = self.polling_rate.load(Ordering::SeqCst);
         let mut last_update = Instant::now();
         let mut last_downloaded = *downloaded;
 

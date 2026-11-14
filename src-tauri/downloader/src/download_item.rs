@@ -3,6 +3,7 @@ use crate::download_run_error::{DownloadRunError, FailureDetails};
 use crate::download_status::{DownloadState, DownloadStatus};
 use crate::in_place_segment::{InPlaceSegment, SegmentCommand};
 use crate::verifier::{VerifierMaybe, VerifyError};
+use atomic_time::AtomicDuration;
 use futures::future::try_join_all;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,8 +35,8 @@ pub struct DownloadItem {
     pub filepath: PathBuf,
     /// Source URL of the download.
     pub url: String,
-    /// Polling rate in milliseconds for progress updates.
-    pub polling_rate_ms: u64,
+    /// Shared, atomically-updatable polling rate.
+    pub polling_rate: Arc<AtomicDuration>,
     /// Channel sender for issuing commands (pause, stop) to segments.
     pub segment_command_sender: watch::Sender<SegmentCommand>,
     /// Optional hash verifier for integrity checks.
@@ -53,7 +54,7 @@ impl DownloadItem {
     pub async fn create_from_data(
         client: reqwest::Client,
         mut download_data: DownloadData,
-        polling_rate_ms: u64,
+        polling_rate: Arc<AtomicDuration>,
     ) -> Result<Arc<Self>, Box<dyn std::error::Error>> {
         // 1. Pre-allocate target file on disk if filesize is known
         let file_exists = tokio::fs::metadata(&download_data.filepath).await.is_ok();
@@ -87,7 +88,7 @@ impl DownloadItem {
             let (segment, rx) = InPlaceSegment::new(
                 client.clone(),
                 data,
-                polling_rate_ms,
+                polling_rate.clone(),
                 req_reciever,
                 download_data.state.clone(),
                 download_data.retry_scheme.clone(),
@@ -103,7 +104,7 @@ impl DownloadItem {
             status_receivers,
             filepath: download_data.filepath,
             url: download_data.url,
-            polling_rate_ms,
+            polling_rate,
             segment_command_sender: segment_commander,
             verifier: download_data.verifier.clone(),
             verify_result_receiver: receiver,

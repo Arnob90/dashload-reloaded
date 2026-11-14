@@ -24,7 +24,7 @@ tokio = { version = "1.47.1", features = ["full"] }
 url = "2.5.7"
 uuid = { version = "1.18.1", features = ["v4"] }
 log = "0.4.28"
-atomic-time = "1.0.0"
+atomic-time = { version = "1.0.0", features = ["serde"] }
 
 [dev-dependencies]
 test-log = "0.2.18"

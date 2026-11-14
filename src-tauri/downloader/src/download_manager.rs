@@ -18,6 +18,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use atomic_time::{AtomicDuration, Ordering};
 use thiserror::Error;
 use tokio::fs;
 use uuid::Uuid;
@@ -51,8 +52,8 @@ pub struct DownloadManager {
     pub download_items: DashMap<String, Arc<DownloadItem>>,
     /// Shared HTTP client (`reqwest::Client`) used for making download requests.
     pub client: reqwest::Client,
-    /// Polling interval in milliseconds for status updates and progress tracking.
-    pub poll_every_ms: u64,
+    /// Shared, atomically-updatable polling interval.
+    pub poll_every: Arc<AtomicDuration>,
     /// Background runner tasks keyed by download ID, used to await termination on
     /// stop/retry before reusing a file path.
     pub runner_handles: DashMap<String, tokio::task::JoinHandle<()>>,
@@ -77,11 +78,20 @@ impl DownloadManager {
     pub fn new(client: reqwest::Client, poll_every_ms: u64) -> Self {
         Self {
             download_items: DashMap::new(),
-            poll_every_ms,
+            poll_every: Arc::new(AtomicDuration::from(Duration::from_millis(
+                poll_every_ms,
+            ))),
             client,
             runner_handles: DashMap::new(),
             op_locks: DashMap::new(),
         }
+    }
+
+    /// Sets the polling interval atomically. All active segments pick up the
+    /// new rate on their next progress tick.
+    pub fn set_poll_every(&self, poll_every_ms: u64) {
+        self.poll_every
+            .store(Duration::from_millis(poll_every_ms), Ordering::SeqCst);
     }
 
     /// Returns the per-download operation lock, creating it on first use.
@@ -106,9 +116,13 @@ impl DownloadManager {
                 DownloadState::Retrying { .. } => DownloadState::Paused,
                 other => other,
             };
-            let item = DownloadItem::create_from_data(client.clone(), data, poll_every_ms)
-                .await
-                .map_err(|e| ManagerError::DownloadCreationError(e.to_string()))?;
+            let item = DownloadItem::create_from_data(
+                client.clone(),
+                data,
+                manager.poll_every.clone(),
+            )
+            .await
+            .map_err(|e| ManagerError::DownloadCreationError(e.to_string()))?;
             manager.download_items.insert(id.clone(), item.clone());
             let handle = tokio::spawn(async move {
                 let _ = item.start().await;
@@ -206,9 +220,13 @@ impl DownloadManager {
             )
             .await?;
         // 2. Construct the DownloadItem
-        let item = DownloadItem::create_from_data(self.client.clone(), data, self.poll_every_ms)
-            .await
-            .map_err(|e| ManagerError::DownloadCreationError(e.to_string()))?;
+        let item = DownloadItem::create_from_data(
+            self.client.clone(),
+            data,
+            self.poll_every.clone(),
+        )
+        .await
+        .map_err(|e| ManagerError::DownloadCreationError(e.to_string()))?;
 
         self.download_items.insert(id.clone(), item.clone());
 
@@ -247,10 +265,13 @@ impl DownloadManager {
         item_data.state = DownloadState::Running {
             download_speed: 0.0,
         };
-        let new_item =
-            DownloadItem::create_from_data(self.client.clone(), item_data, self.poll_every_ms)
-                .await
-                .map_err(|e| ManagerError::OperationFailed(e.to_string()))?;
+        let new_item = DownloadItem::create_from_data(
+            self.client.clone(),
+            item_data,
+            self.poll_every.clone(),
+        )
+        .await
+        .map_err(|e| ManagerError::OperationFailed(e.to_string()))?;
         let item_clone = new_item.clone();
         let handle = tokio::spawn(async move {
             let _ = item_clone.start().await;
