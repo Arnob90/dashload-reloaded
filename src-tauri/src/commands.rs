@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use tauri::ipc::Invoke;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 
 /// Resolves cross-platform app data path: %APPDATA%/bundle_id/downloads.json
 pub fn get_session_file_path(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -26,7 +26,22 @@ pub fn get_session_file_path(app: &AppHandle) -> Result<PathBuf, Box<dyn std::er
 pub struct AppState {
     pub client: reqwest::Client,
     pub download_manager: DownloadManager,
-    pub config: crate::config_file::Config,
+    pub config: watch::Sender<crate::config_file::Config>,
+}
+
+#[tauri::command]
+async fn set_config_file(
+    state: State<'_, AppState>,
+    config: crate::config_file::Config,
+) -> Result<(), ()> {
+    // Persist to disk so config survives restarts.
+    if let Err(e) = confy::store("dashload", None, &config) {
+        eprintln!("Warning: Failed to save config file: {:?}", e);
+        return Err(());
+    }
+    // Broadcast the new config to any watchers.
+    let _ = state.config.send(config);
+    Ok(())
 }
 
 #[tauri::command]
@@ -51,7 +66,10 @@ async fn open_file(app: AppHandle) -> Option<String> {
 }
 #[tauri::command]
 async fn get_config_file(state: State<'_, AppState>) -> Result<crate::config_file::Config, ()> {
-    Ok(state.config.clone())
+    let rx = state.config.subscribe();
+    let config = rx.borrow().clone();
+    drop(rx);
+    Ok(config)
 }
 
 #[tauri::command]
@@ -143,6 +161,7 @@ pub fn get_handlers() -> impl Fn(Invoke<tauri::Wry>) -> bool {
         save_session,
         delete_download,
         get_config_file,
+        set_config_file,
         stop_download
     ]
 }
