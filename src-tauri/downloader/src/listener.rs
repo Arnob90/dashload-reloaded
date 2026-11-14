@@ -1,5 +1,5 @@
 use crate::external_download_request::ExternalDownloadRequest;
-use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
+use axum::{Json, Router, extract::State, http::StatusCode, routing::get, routing::post};
 use thiserror::Error;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -48,6 +48,7 @@ impl Server {
     pub async fn start(self) -> Result<(), ServerError> {
         let app = Router::new()
             .route("/download", post(handle_download_request))
+            .route("/health", get(health_check))
             .with_state(self.state); // Inject state into Axum router
 
         let addr = format!("127.0.0.1:{}", self.port);
@@ -76,4 +77,8 @@ async fn handle_download_request(
     })?;
 
     Ok(Json("Download request queued successfully".to_string()))
+}
+
+async fn health_check() -> StatusCode {
+    StatusCode::OK
 }
