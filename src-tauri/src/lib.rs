@@ -1,4 +1,9 @@
-use tauri::{tray::TrayIconBuilder, menu::{Menu, MenuItem}, image::Image, Manager};
+use tauri::{
+    image::Image,
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+    Manager,
+};
 mod commands;
 mod config_file;
 mod events;
@@ -88,7 +93,6 @@ pub fn run() {
             let _tray = TrayIconBuilder::with_id("main-tray")
                 .icon(tray_icon)
                 .menu(&menu)
-                .show_menu_on_left_click(true)
                 .on_menu_event(|tray, event| match event.id().as_ref() {
                     "show" => {
                         if let Some(window) = tray.app_handle().get_webview_window("main") {
@@ -107,6 +111,16 @@ pub fn run() {
                             }
                             app_handle.exit(0);
                         });
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|t, e| match e {
+                    tauri::SystemTrayEvent::LeftClick { .. } => {
+                        if let Some(window) = t.app_handle().get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
                     }
                     _ => {}
                 })

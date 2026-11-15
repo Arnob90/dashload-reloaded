@@ -26,6 +26,8 @@ uuid = { version = "1.18.1", features = ["v4"] }
 log = "0.4.28"
 atomic-time = { version = "1.0.0", features = ["serde"] }
 jiff = { version = "0.2.43", features = ["serde"] }
+unicode-normalization = "0.1.26"
+percent-encoding = "2.3.2"
 
 [dev-dependencies]
 test-log = "0.2.18"
