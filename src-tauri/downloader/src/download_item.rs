@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::watch;
-
 /// Options for download item creation.
 pub enum CreateOpts {
     Segmented { num_segments: u64, filesize: u64 },
@@ -47,6 +46,8 @@ pub struct DownloadItem {
     pub verify_result_sender: watch::Sender<VerificationState>,
     /// Retry scheme for download
     pub retry_scheme: crate::retry_scheme::RetryScheme,
+    /// Time elapsed since the download started
+    pub elapsed: AtomicDuration,
 }
 
 impl DownloadItem {
@@ -98,7 +99,6 @@ impl DownloadItem {
             status_receivers.push(rx);
         }
         let (sender, receiver) = watch::channel(VerificationState::Verifying);
-
         let item = Arc::new(Self {
             segments,
             status_receivers,
@@ -110,6 +110,7 @@ impl DownloadItem {
             verify_result_receiver: receiver,
             verify_result_sender: sender,
             retry_scheme: download_data.retry_scheme,
+            elapsed: AtomicDuration::new(download_data.elapsed),
         });
         Ok(item)
     }
@@ -120,23 +121,27 @@ impl DownloadItem {
         for segment in &self.segments {
             futures.push(segment.start());
         }
-
-        // Run all segment workers concurrently
-        let results = try_join_all(futures).await;
-        // Delete the file for a stop command
-        if *self.segment_command_sender.borrow() == SegmentCommand::Stop {
-            //TODO: Warn user if file deletion fails
-            let _ = tokio::fs::remove_file(&self.filepath).await;
+        tokio::select! {
+            results = try_join_all(futures) => {
+            if *self.segment_command_sender.borrow() == SegmentCommand::Stop {
+                //TODO: Warn user if file deletion fails
+                let _ = tokio::fs::remove_file(&self.filepath).await;
+            }
+                results?;
+            }
+            _ = self.increment_elapsed_task() => {
+            }
         }
-        results?;
+        // Run all segment workers concurrently
         let verify_clone = self.verifier.clone();
         let filepath_clone = self.filepath.clone();
-        let verified = tokio::task::spawn_blocking(move || verify_clone.verify_with_hash(&filepath_clone))
-            .await
-            .map_err(|e| DownloadRunError::DiskError {
-                message: format!("Verification task panicked {}", e),
-                path: None,
-            })?;
+        let verified =
+            tokio::task::spawn_blocking(move || verify_clone.verify_with_hash(&filepath_clone))
+                .await
+                .map_err(|e| DownloadRunError::DiskError {
+                    message: format!("Verification task panicked {}", e),
+                    path: None,
+                })?;
         match verified {
             Ok(true) => {}
             Ok(false) => unreachable!("verify_with_hash returns Err on mismatch"),
@@ -162,6 +167,33 @@ impl DownloadItem {
         }
         let _ = self.verify_result_sender.send(VerificationState::Verified);
         Ok(())
+    }
+
+    pub async fn increment_elapsed_task(&self) {
+        let mut last_tick = tokio::time::Instant::now();
+        let mut interval =
+            tokio::time::interval(self.polling_rate.load(std::sync::atomic::Ordering::SeqCst));
+        loop {
+            interval.tick().await;
+            let elapsed_since_last_tick = last_tick.elapsed();
+            let current_status = self.get_status();
+            if matches!(current_status.state, DownloadState::Running { .. }) {
+                self.elapsed.fetch_saturating_add(
+                    elapsed_since_last_tick,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+            }
+            match current_status.state {
+                DownloadState::Stopped
+                | DownloadState::Completed { .. }
+                | DownloadState::Failed(_)
+                | DownloadState::Paused => {
+                    break;
+                }
+                _ => {}
+            }
+            last_tick = tokio::time::Instant::now();
+        }
     }
 
     /// Computes aggregated status across all active segment receivers (Instantaneous).
@@ -250,9 +282,7 @@ impl DownloadItem {
         if let DownloadState::Completed { .. } = overall_state {
             overall_state = match &*self.verify_result_receiver.borrow() {
                 VerificationState::Verifying => DownloadState::Verifying,
-                VerificationState::VerifyFailed(details) => {
-                    DownloadState::Failed(details.clone())
-                }
+                VerificationState::VerifyFailed(details) => DownloadState::Failed(details.clone()),
                 VerificationState::Verified => overall_state,
             }
         }
@@ -278,6 +308,7 @@ impl DownloadItem {
             state: self.get_status().state,
             verifier: self.verifier.clone(),
             retry_scheme: self.retry_scheme.clone(),
+            elapsed: self.elapsed.load(std::sync::atomic::Ordering::SeqCst),
         }
     }
 

@@ -120,10 +120,9 @@ function buildErrorReport(entry: TableEntry, details: FailureDetails): string {
         `Failed at: ${details.timestamp_secs > 0 ? new Date(details.timestamp_secs * 1000).toLocaleString() : "unknown"}`,
     );
     lines.push(
-        `Failed segment: ${
-            details.failed_segment_index != null
-                ? `Segment ${details.failed_segment_index + 1}`
-                : "unknown"
+        `Failed segment: ${details.failed_segment_index != null
+            ? `Segment ${details.failed_segment_index + 1}`
+            : "unknown"
         }`,
     );
     lines.push(`Retry attempts made: ${details.attempts_made}`);

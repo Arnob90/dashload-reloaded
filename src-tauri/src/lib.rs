@@ -1,7 +1,7 @@
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
 mod commands;
@@ -115,7 +115,10 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|t, e| match e {
-                    tauri::SystemTrayEvent::LeftClick { .. } => {
+                    tauri::tray::TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        .. } => {
                         if let Some(window) = t.app_handle().get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.unminimize();

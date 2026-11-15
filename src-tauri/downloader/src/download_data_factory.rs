@@ -9,6 +9,7 @@ use crate::verifier::VerifierMaybe;
 use reqwest::header::HeaderMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::fs;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -83,6 +84,7 @@ impl DownloadDataFactory {
             },
             verifier,
             retry_scheme,
+            elapsed: Duration::ZERO,
         }
     }
 
@@ -110,6 +112,7 @@ impl DownloadDataFactory {
             },
             verifier,
             retry_scheme,
+            elapsed: Duration::ZERO,
         }
     }
 

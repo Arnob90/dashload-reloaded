@@ -4,6 +4,7 @@ use crate::{
     download_status::DownloadState, in_place_segment::InPlaceSegmentData, verifier::VerifierMaybe,
 };
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Complete persistent state for a single download, used for session serialization and reconstruction.
 #[derive(Serialize, Deserialize, Clone)]
@@ -22,4 +23,6 @@ pub struct DownloadData {
     pub verifier: VerifierMaybe,
     /// Retry scheme for download
     pub retry_scheme: crate::retry_scheme::RetryScheme,
+    /// Time elapsed since the download started
+    pub elapsed: Duration,
 }

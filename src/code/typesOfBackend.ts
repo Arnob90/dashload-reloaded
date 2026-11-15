@@ -55,6 +55,7 @@ export const ConfigSchema = z.object({
     default_number_of_segments: z.number(),
     retry_scheme: RetrySchemeSchema,
     request_headers: RequestHeadersSchema,
+    polling_rate: z.string(),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
@@ -374,6 +375,11 @@ export const DownloadOptionsSchema = z.object({
 });
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>;
 
+export const RustDurationSchema = z.object({
+    secs: z.number(),
+    nanos: z.number(),
+});
+export type RustDuration = z.infer<typeof RustDurationSchema>;
 export const DownloadDataSchema = z.object({
     url: z.string(),
     filepath: z.string(),
@@ -382,6 +388,7 @@ export const DownloadDataSchema = z.object({
     state: DownloadStateSchema,
     verifier: VerifierMaybeSchema,
     retry_scheme: RetrySchemeSchema,
+    elapsed: RustDurationSchema,
 })
 export type DownloadData = z.infer<typeof DownloadDataSchema>
 
