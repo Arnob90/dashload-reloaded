@@ -373,14 +373,12 @@ export function DownloadTable() {
                             <Table.Tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
                                     <Table.Th key={header.id} style={{ width: header.column.getSize() }}>
-                                        <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-                                            {header.isPlaceholder
-                                                ? null
-                                                : flexRender(
-                                                    header.column.columnDef.header,
-                                                    header.getContext()
-                                                )}
-                                        </Text>
+                                        {header.isPlaceholder
+                                            ? null
+                                            : flexRender(
+                                                header.column.columnDef.header,
+                                                header.getContext()
+                                            )}
                                     </Table.Th>
                                 ))}
                             </Table.Tr>
