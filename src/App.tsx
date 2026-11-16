@@ -10,6 +10,7 @@ import { useDisclosure } from "@mantine/hooks";
 import { DownloadTable } from "./components/downloadtable/downloadtable";
 import { ErrorBoundary, getErrorMessage } from "react-error-boundary"
 import { ExtensionRequestDownload } from "./components/adddownload/addDownloadOnExtensionRequest";
+import { useEffect } from "react";
 const theme = createTheme({
     fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
     primaryColor: 'indigo',
@@ -34,6 +35,9 @@ const theme = createTheme({
 function App() {
     const [addDownloadDialogOpened, { open: openAddDownloadDialog, close: closeAddDownloadDialog }] = useDisclosure(false)
     const requestMap = useExternalDownloadRequestMap();
+    useEffect(() => {
+        closeAddDownloadDialog();
+    }, [requestMap])
     useNotifyDownload(requestMap);
     return (
         <ErrorBoundary fallbackRender={({ error, resetErrorBoundary }) => (
