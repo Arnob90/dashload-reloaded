@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use rand;
 use serde::{Deserialize, Serialize};
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExponentialBackoff {
     pub base_delay: std::time::Duration,
     pub max_delay: std::time::Duration,
@@ -53,7 +53,7 @@ impl ExponentialBackoff {
     }
 }
 ///Max attempt counts retries after the initial attempt, so a max_attempts of 3 means 1 initial attempt + 3 retries = 4 total attempts.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RetryScheme {
     pub max_attempts: u32,
     pub backoff: ExponentialBackoff,

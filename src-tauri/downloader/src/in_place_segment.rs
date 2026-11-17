@@ -15,7 +15,7 @@ use tokio::sync::watch;
 use tokio::time::{Duration, Instant};
 
 /// Defines the start and end byte offsets (inclusive) for a download segment.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SegmentInfo {
     pub start: u64,
     pub end: u64,
@@ -80,7 +80,7 @@ enum FetchResponseOutcome {
 
 /// Persistent data defining a single file segment for download or resume operations.
 /// Includes URL, file path, progress, segment boundaries, and request headers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InPlaceSegmentData {
     /// The source download URL.
     pub url: String,

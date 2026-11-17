@@ -9,7 +9,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::verifier::VerifyError;
 
     /// `VerifyError::IOError` serializes the io::Error payload as the plain

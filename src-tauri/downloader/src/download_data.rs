@@ -1,13 +1,14 @@
 use std::path::PathBuf;
 
 use crate::{
-    download_status::DownloadState, in_place_segment::InPlaceSegmentData, verifier::VerifierMaybe,
+    download_status::DownloadState, in_place_segment::InPlaceSegmentData,
+    verifier::VerifierMaybe,
 };
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Complete persistent state for a single download, used for session serialization and reconstruction.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct DownloadData {
     /// The source download URL.
     pub url: String,
@@ -25,4 +26,26 @@ pub struct DownloadData {
     pub retry_scheme: crate::retry_scheme::RetryScheme,
     /// Time elapsed since the download started
     pub elapsed: Duration,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Full `DownloadData` serde round-trip (the persistence unit).
+    #[test]
+    fn download_data_serde_roundtrip() {
+        let data = DownloadDataFactory::new_segmented(
+            "https://example.com/file.bin".to_string(),
+            PathBuf::from("/tmp/file.bin"),
+            1_000_000,
+            2,
+            VerifierMaybe::none(),
+            HeaderMap::new(),
+            RetryScheme::default(),
+        );
+        let json = serde_json::to_string(&data).unwrap();
+        let back: DownloadData = serde_json::from_str(&json).unwrap();
+        assert_eq!(data, back);
+    }
 }

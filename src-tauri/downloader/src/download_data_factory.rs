@@ -127,6 +127,72 @@ impl DownloadDataFactory {
 }
 
 #[cfg(test)]
+mod deserialize_tests {
+    use super::*;
+
+    fn sample_data() -> DownloadData {
+        DownloadDataFactory::new_normal(
+            "https://example.com/file.bin".to_string(),
+            PathBuf::from("/tmp/file.bin"),
+            VerifierMaybe::none(),
+            RequestHeaders::default(),
+            RetryScheme::default(),
+        )
+    }
+
+    /// Valid session file round-trips to one entry with equal data.
+    #[tokio::test]
+    async fn deserialize_valid_session_file() {
+        let data = sample_data();
+        let mut map = HashMap::new();
+        map.insert("dl-1".to_string(), data.clone());
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let json = serde_json::to_string(&map).unwrap();
+        fs::write(&path, json).await.unwrap();
+
+        let result = DownloadDataFactory::deserialize_datas(&path).await.unwrap();
+        assert_eq!(result.len(), 1);
+        let got = result.get("dl-1").unwrap();
+        assert_eq!(got.url, data.url);
+        assert_eq!(got.filepath, data.filepath);
+        assert_eq!(got.length, data.length);
+        assert_eq!(got.state, data.state);
+        assert_eq!(got.segments.len(), data.segments.len());
+        assert_eq!(got.verifier.is_some(), data.verifier.is_some());
+        assert_eq!(got.retry_scheme.max_attempts, data.retry_scheme.max_attempts);
+    }
+
+    /// Invalid JSON -> DeserializationError.
+    #[tokio::test]
+    async fn deserialize_invalid_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.json");
+        fs::write(&path, "{ this is not json }").await.unwrap();
+
+        let err = DownloadDataFactory::deserialize_datas(&path)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DataSerializationError::DeserializationError(_)
+        ));
+    }
+
+    /// Missing file -> IoError.
+    #[tokio::test]
+    async fn deserialize_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.json");
+        let err = DownloadDataFactory::deserialize_datas(&path)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DataSerializationError::IoError(_)));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -28,7 +28,7 @@ pub enum HashAlgo {
 }
 
 /// Internal verifier holding the expected hash and algorithm.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Verifier {
     to_match_hash: String,
     algo: HashAlgo,
@@ -67,7 +67,7 @@ impl Verifier {
 }
 
 /// Optional wrapper around `Verifier`, allowing downloads without checksum verification.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct VerifierMaybe {
     verifier: Option<Verifier>,
 }

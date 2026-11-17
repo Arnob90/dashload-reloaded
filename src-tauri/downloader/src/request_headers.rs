@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Optional HTTP headers to include with download requests.
 /// All fields are optional; missing fields are omitted from the request.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RequestHeaders {
     /// `Cookie` header value.
     pub cookies: Option<String>,
@@ -81,7 +81,7 @@ impl Default for RequestHeaders {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+    use reqwest::header::HeaderValue;
 
     fn map_with_all() -> HeaderMap {
         let mut m = HeaderMap::new();
