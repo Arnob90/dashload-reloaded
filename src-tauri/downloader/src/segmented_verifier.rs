@@ -37,6 +37,34 @@ impl From<reqwest::Error> for SegmentVerificationError {
     }
 }
 
+/// Extracts `(start, end, total)` from a `Content-Range` header value.
+///
+/// The expected form is `bytes <start>-<end>/<total>` where `<total>` is a
+/// concrete byte count (unknown totals like `bytes 0-9/*` are rejected).
+/// Leading zeros are accepted (standard `u64::parse` semantics).
+pub(crate) fn parse_content_range(value: &str) -> Result<(u64, u64, u64), SegmentVerificationError> {
+    let (range_part, total_part) = value
+        .strip_prefix("bytes ")
+        .and_then(|value| value.split_once('/'))
+        .ok_or(SegmentVerificationError::ServerNotRangable)?;
+
+    let (start_part, end_part) = range_part
+        .split_once('-')
+        .ok_or(SegmentVerificationError::ServerNotRangable)?;
+
+    let start = start_part
+        .parse::<u64>()
+        .map_err(|_| SegmentVerificationError::ServerNotRangable)?;
+    let end = end_part
+        .parse::<u64>()
+        .map_err(|_| SegmentVerificationError::ServerNotRangable)?;
+    let total = total_part
+        .parse::<u64>()
+        .map_err(|_| SegmentVerificationError::ServerNotRangable)?;
+
+    Ok((start, end, total))
+}
+
 /// Verifies that a remote server supports segmented (range-based) downloads.
 ///
 /// Checks that:
@@ -78,27 +106,7 @@ pub async fn verify_segmented(
         .and_then(|value| value.to_str().ok())
         .ok_or(SegmentVerificationError::ServerNotRangable)?;
 
-    // Expected format: "bytes 0-0/TOTAL"
-    let (range_part, total_part) = content_range
-        .strip_prefix("bytes ")
-        .and_then(|value| value.split_once('/'))
-        .ok_or(SegmentVerificationError::ServerNotRangable)?;
-
-    let (start_part, end_part) = range_part
-        .split_once('-')
-        .ok_or(SegmentVerificationError::ServerNotRangable)?;
-
-    let start = start_part
-        .parse::<u64>()
-        .map_err(|_| SegmentVerificationError::ServerNotRangable)?;
-
-    let returned_end = end_part
-        .parse::<u64>()
-        .map_err(|_| SegmentVerificationError::ServerNotRangable)?;
-
-    let total_size = total_part
-        .parse::<u64>()
-        .map_err(|_| SegmentVerificationError::ServerNotRangable)?;
+    let (start, returned_end, total_size) = parse_content_range(content_range)?;
 
     if start != 0 || returned_end != 0 || total_size == 0 {
         return Err(SegmentVerificationError::ServerNotRangable);
@@ -137,4 +145,29 @@ pub async fn verify_segmented(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_content_range_valid() {
+        assert_eq!(parse_content_range("bytes 0-0/1000").unwrap(), (0, 0, 1000));
+        assert_eq!(parse_content_range("bytes 5-9/100").unwrap(), (5, 9, 100));
+        assert_eq!(parse_content_range("bytes 00-00/1000").unwrap(), (0, 0, 1000));
+    }
+
+    #[test]
+    fn parse_content_range_errors() {
+        // Unknown total
+        assert!(parse_content_range("bytes 0-99/*").is_err());
+        // Missing /total
+        assert!(parse_content_range("bytes 0-0").is_err());
+        // Wrong unit
+        assert!(parse_content_range("items 0-0/10").is_err());
+        // Malformed garbage
+        assert!(parse_content_range("garbage").is_err());
+        assert!(parse_content_range("bytes a-b/10").is_err());
+    }
 }

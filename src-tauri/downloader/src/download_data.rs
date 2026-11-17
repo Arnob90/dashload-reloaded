@@ -31,6 +31,10 @@ pub struct DownloadData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        download_data_factory::DownloadDataFactory, retry_scheme::RetryScheme,
+    };
+    use reqwest::header::HeaderMap;
 
     /// Full `DownloadData` serde round-trip (the persistence unit).
     #[test]
