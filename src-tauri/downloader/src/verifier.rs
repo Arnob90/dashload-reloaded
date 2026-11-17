@@ -8,15 +8,12 @@ use std::path::Path;
 use thiserror::Error;
 
 /// Errors that can occur during file hash verification.
-#[derive(Error, Debug, Serialize)]
+#[derive(Error, Debug)]
 pub enum VerifyError {
     #[error("There has been error in IO")]
-    IOError(#[serde(serialize_with = "serialize_io_error")] #[from] std::io::Error),
+    IOError(#[from] std::io::Error),
     #[error("Hash mismatch: expected {expected}, got {actual}")]
-    HashMismatch {
-        expected: String,
-        actual: String,
-    },
+    HashMismatch { expected: String, actual: String },
 }
 
 /// Supported hash algorithms for integrity verification.
@@ -135,16 +132,12 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    const HELLO_SHA256: &str =
-        "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
-    const HELLO_SHA512: &str =
-        "309ecc489c12d6eb4cc40f50c902f2b4d0ed77ee511a7c7a9bcd3ca86d4cd86f989dd35bc5ff499670da34255b45b0cfd830e81f605dcf7dc5542e93ae9cd76f";
+    const HELLO_SHA256: &str = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+    const HELLO_SHA512: &str = "309ecc489c12d6eb4cc40f50c902f2b4d0ed77ee511a7c7a9bcd3ca86d4cd86f989dd35bc5ff499670da34255b45b0cfd830e81f605dcf7dc5542e93ae9cd76f";
     const HELLO_MD5: &str = "5eb63bbbe01eeed093cb22bb8f5acdc3";
 
-    const BIG_SHA256: &str =
-        "731620161155f68e1209f22bc34a726bf5a583f40acf23ae55684b674fdbebf2";
-    const BIG_SHA512: &str =
-        "68fea74b36d50e9bff5ec4eca80430c82f76c234d36e82608fc47317d0eaa1b57acdc1cb6e52a35199a75bb4067de9e28373e3d8d644be265763fe7a40a6118f";
+    const BIG_SHA256: &str = "731620161155f68e1209f22bc34a726bf5a583f40acf23ae55684b674fdbebf2";
+    const BIG_SHA512: &str = "68fea74b36d50e9bff5ec4eca80430c82f76c234d36e82608fc47317d0eaa1b57acdc1cb6e52a35199a75bb4067de9e28373e3d8d644be265763fe7a40a6118f";
     const BIG_MD5: &str = "7354f16d06a013232daa23cfa7a092df";
 
     fn write_hello(file: &mut std::fs::File) {
@@ -191,7 +184,8 @@ mod tests {
     #[test]
     fn verify_missing_file_returns_io_error() {
         let v = VerifierMaybe::new(HashAlgo::Sha256, HELLO_SHA256.to_string());
-        let err = v.verify_with_hash(Path::new("/nonexistent/path/does/not/exist"))
+        let err = v
+            .verify_with_hash(Path::new("/nonexistent/path/does/not/exist"))
             .unwrap_err();
         assert!(matches!(err, VerifyError::IOError(_)));
     }
