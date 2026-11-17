@@ -130,6 +130,44 @@ impl DownloadState {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Table-driven: every non-Failed variant yields `None`, only `Failed`
+    /// exposes its inner `DownloadRunError`.
+    #[test]
+    fn get_error_only_for_failed() {
+        assert_eq!(DownloadState::Stopped.get_error(), None);
+        assert_eq!(
+            DownloadState::Running {
+                download_speed: 1.0
+            }
+            .get_error(),
+            None
+        );
+        assert_eq!(
+            DownloadState::Completed { size: 100 }.get_error(),
+            None
+        );
+        assert_eq!(DownloadState::Paused.get_error(), None);
+        assert_eq!(DownloadState::Verifying.get_error(), None);
+        assert_eq!(
+            DownloadState::Retrying {
+                attempt: 1,
+                max_attempts: 5,
+                wait_secs: 2
+            }
+            .get_error(),
+            None
+        );
+
+        let err = DownloadRunError::AlreadyRunning;
+        let state = DownloadState::Failed(FailureDetails::new(err.clone()));
+        assert_eq!(state.get_error(), Some(&err));
+    }
+}
+
 /// Aggregated status snapshot for a download item at a point in time.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DownloadStatus {
