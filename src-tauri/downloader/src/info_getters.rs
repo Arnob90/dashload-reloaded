@@ -24,6 +24,17 @@ impl From<reqwest::Error> for FilepathGettingError {
     }
 }
 
+
+    /// Extracts the file size from a `Content-Length` header map.
+    ///
+    /// Returns `Some(n)` if the header is present and valid, `None` otherwise.
+    pub(crate) fn filesize_from_headers(headers: &HeaderMap) -> Option<u64> {
+        headers
+            .get("Content-Length")
+            .and_then(|len| len.to_str().ok())
+            .and_then(|len_str| len_str.parse::<u64>().ok())
+    }
+
 pub fn sanitize_filename(raw: &str) -> String {
     // 1. URL-decode the string first (converts %20 -> space, %28 -> (, etc.)
     let decoded = percent_decode_str(raw).decode_utf8_lossy();
@@ -157,6 +168,22 @@ mod tests {
     // ==========================================
     // i. Normal Filenames
     // ==========================================
+
+
+    #[test]
+    fn filesize_from_headers_valid() {
+        use reqwest::header::{HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.insert("content-length", HeaderValue::from_static("1234"));
+        assert_eq!(crate::info_getters::filesize_from_headers(&headers), Some(1234));
+    }
+
+    #[test]
+    fn filesize_from_headers_missing() {
+        use reqwest::header::HeaderMap;
+        let headers = HeaderMap::new();
+        assert_eq!(crate::info_getters::filesize_from_headers(&headers), None);
+    }
     #[test]
     fn test_normal_filename() {
         assert_eq!(sanitize_filename("document.pdf"), "document.pdf");

@@ -19,6 +19,18 @@ impl From<reqwest::Error> for LengthGettingErrors {
     }
 }
 
+/// Extracts the content length from a `Content-Length` header string.
+///
+/// Returns `Ok(n)` for a valid decimal u64 string. Returns
+/// `IllBehavedServer` for empty, non-numeric, or negative values
+/// (u64 parsing rejects `-1`).
+pub(crate) fn length_from_header(value: &str) -> Result<u64, LengthGettingErrors> {
+    let length_num: u64 = value
+        .parse()
+        .map_err(|_| LengthGettingErrors::IllBehavedServer)?;
+    Ok(length_num)
+}
+
 /// Extracts the `Content-Length` from a `reqwest::Response` header.
 /// Returns error if header is missing, not valid UTF-8, or not a valid u64.
 pub async fn get_length_from_response(
@@ -31,10 +43,7 @@ pub async fn get_length_from_response(
         .to_str()
         .map_err(|_| LengthGettingErrors::IllBehavedServer)?;
 
-    let length_num: u64 = length_str
-        .parse()
-        .map_err(|_| LengthGettingErrors::IllBehavedServer)?;
-    Ok(length_num)
+    length_from_header(length_str)
 }
 
 /// Retrieves the file size (content length) for a given URL.
@@ -53,4 +62,24 @@ pub async fn get_length(client: reqwest::Client, url: &str) -> Result<u64, Lengt
         return get_length_from_response(try_get).await;
     }
     length
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn length_from_header_valid() {
+        assert_eq!(length_from_header("123").unwrap(), 123);
+        assert_eq!(length_from_header("0").unwrap(), 0);
+        assert_eq!(length_from_header("18446744073709551615").unwrap(), 18_446_744_073_709_551_615);
+    }
+
+    #[test]
+    fn length_from_header_errors() {
+        assert!(matches!(length_from_header(""), Err(LengthGettingErrors::IllBehavedServer)));
+        assert!(matches!(length_from_header("abc"), Err(LengthGettingErrors::IllBehavedServer)));
+        assert!(matches!(length_from_header("-5"), Err(LengthGettingErrors::IllBehavedServer)));
+        assert!(matches!(length_from_header("1.5"), Err(LengthGettingErrors::IllBehavedServer)));
+    }
 }
