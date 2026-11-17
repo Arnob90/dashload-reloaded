@@ -748,3 +748,131 @@ fn calculate_speed(download_diff: u64, time_diff: Duration) -> f64 {
     let secs_diff = time_diff.as_secs_f64();
     (download_diff as f64) / secs_diff
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `is_retryable_http_status` pins the set of transient server-side
+    /// statuses that the state machine will retry on. Client errors
+    /// (4xx except 408/425/429) are deliberately excluded.
+    #[test]
+    fn is_retryable_http_status_retryable_codes() {
+        assert!(is_retryable_http_status(StatusCode::REQUEST_TIMEOUT)); // 408
+        assert!(is_retryable_http_status(StatusCode::TOO_EARLY)); // 425
+        assert!(is_retryable_http_status(StatusCode::TOO_MANY_REQUESTS)); // 429
+        assert!(is_retryable_http_status(StatusCode::INTERNAL_SERVER_ERROR)); // 500
+        assert!(is_retryable_http_status(StatusCode::BAD_GATEWAY)); // 502
+        assert!(is_retryable_http_status(StatusCode::SERVICE_UNAVAILABLE)); // 503
+        assert!(is_retryable_http_status(StatusCode::GATEWAY_TIMEOUT)); // 504
+    }
+
+    #[test]
+    fn is_retryable_http_status_non_retryable_codes() {
+        assert!(!is_retryable_http_status(StatusCode::OK)); // 200
+        assert!(!is_retryable_http_status(StatusCode::PARTIAL_CONTENT)); // 206
+        assert!(!is_retryable_http_status(StatusCode::BAD_REQUEST)); // 400
+        assert!(!is_retryable_http_status(StatusCode::UNAUTHORIZED)); // 401
+        assert!(!is_retryable_http_status(StatusCode::FORBIDDEN)); // 403
+        assert!(!is_retryable_http_status(StatusCode::NOT_FOUND)); // 404
+        assert!(!is_retryable_http_status(StatusCode::GONE)); // 410
+        assert!(!is_retryable_http_status(StatusCode::RANGE_NOT_SATISFIABLE)); // 416
+    }
+
+    /// `get_range_header` has four arms:
+    ///   1. segmented + fresh   -> `bytes={start}-{end}`
+    ///   2. segmented + resumed -> `bytes={start+d}-{end}`
+    ///   3. non-segmented + resumed -> `bytes={d}-` (open-ended)
+    ///   4. non-segmented + fresh (d == 0) -> None
+    fn seg(start: u64, end: u64) -> SegmentInfo {
+        SegmentInfo { start, end }
+    }
+
+    fn data_with_info(info: Option<SegmentInfo>, last_downloaded: u64) -> InPlaceSegmentData {
+        InPlaceSegmentData {
+            url: "https://example.com/file.bin".to_string(),
+            filepath: PathBuf::from("/tmp/file.bin"),
+            last_downloaded,
+            info,
+            headers: RequestHeaders::default(),
+        }
+    }
+
+    #[test]
+    fn get_range_header_segmented_fresh() {
+        let d = data_with_info(Some(seg(100, 199)), 0);
+        assert_eq!(get_range_header(&d, 0).as_deref(), Some("bytes=100-199"));
+    }
+
+    #[test]
+    fn get_range_header_segmented_resumed() {
+        let d = data_with_info(Some(seg(100, 199)), 0);
+        // offset added to start: bytes=125-199
+        assert_eq!(get_range_header(&d, 25).as_deref(), Some("bytes=125-199"));
+    }
+
+    #[test]
+    fn get_range_header_non_segmented_resumed() {
+        let d = data_with_info(None, 0);
+        // open-ended range from current offset
+        assert_eq!(get_range_header(&d, 50).as_deref(), Some("bytes=50-"));
+    }
+
+    #[test]
+    fn get_range_header_non_segmented_fresh() {
+        let d = data_with_info(None, 0);
+        assert_eq!(get_range_header(&d, 0), None);
+    }
+
+    /// `calculate_speed` is a pure ratio: bytes / seconds.
+    #[test]
+    fn calculate_speed_whole_second() {
+        let dur = Duration::from_secs(1);
+        assert_eq!(calculate_speed(1024, dur), 1024.0);
+    }
+
+    #[test]
+    fn calculate_speed_zero_bytes() {
+        let dur = Duration::from_secs(2);
+        assert_eq!(calculate_speed(0, dur), 0.0);
+    }
+
+    #[test]
+    fn calculate_speed_sub_second_duration() {
+        // 512 bytes over 500 ms -> 1024 bytes/s
+        let dur = Duration::from_millis(500);
+        assert_eq!(calculate_speed(512, dur), 1024.0);
+    }
+
+    #[test]
+    fn calculate_speed_large_values() {
+        let dur = Duration::from_secs(10);
+        assert_eq!(calculate_speed(10_000_000, dur), 1_000_000.0);
+    }
+
+    /// `SegmentInfo::size` returns the inclusive byte count (end - start + 1).
+    #[test]
+    fn segment_info_size_single_byte() {
+        let s = SegmentInfo { start: 5, end: 5 };
+        assert_eq!(s.size(), 1);
+    }
+
+    #[test]
+    fn segment_info_size_multi_byte() {
+        let s = SegmentInfo { start: 0, end: 49 };
+        assert_eq!(s.size(), 50);
+    }
+
+    /// Documented behavior: when `end < start`, `size()` underflows.
+    /// Under the debug profile this panics (arithmetic overflow); under the
+    /// release profile it silently wraps. This test pins the debug behavior
+    /// so a deliberate decision can be made later rather than locking the
+    /// current accident in place.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "attempt to subtract with overflow")]
+    fn segment_info_size_underflow_panics_in_debug() {
+        let s = SegmentInfo { start: 10, end: 5 };
+        let _ = s.size();
+    }
+}
