@@ -3,7 +3,7 @@ import { ExternalRequestMap } from "../../code/externalDownloadRequestQueue";
 import { RunDownloadDialog } from "./runDownload";
 import { Box, LoadingOverlay, Modal } from "@mantine/core";
 import { useDownloadMetadata } from "../../code/useDownloads";
-import { DEFAULT_REQUEST_HEADERS } from "../../code/defaults";
+import { useAppConfig } from "../../code/useAppConfig";
 import { notifications } from "@mantine/notifications";
 
 interface ExtensionRequestDownloadProps {
@@ -11,6 +11,7 @@ interface ExtensionRequestDownloadProps {
 }
 
 export function ExtensionRequestDownload({ requestMap }: ExtensionRequestDownloadProps) {
+    const config = useAppConfig();
     const [modalClosed, setModalClosed] = useState(requestMap.size === 0);
 
     useEffect(() => {
@@ -28,10 +29,10 @@ export function ExtensionRequestDownload({ requestMap }: ExtensionRequestDownloa
         error,
     } = useDownloadMetadata(lastReq?.url ?? "");
 
-    const [headers, setHeaders] = useState(DEFAULT_REQUEST_HEADERS);
+    const [headers, setHeaders] = useState(config.request_headers);
     
     useEffect(() => {
-        setHeaders(lastReq?.headers ?? DEFAULT_REQUEST_HEADERS);
+        setHeaders(lastReq?.headers ?? config.request_headers);
     }, [lastReq]);
 
     useEffect(() => {

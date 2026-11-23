@@ -1,8 +1,37 @@
 import { invoke } from "@tauri-apps/api/core"
 import z from "zod"
-import { DownloadDataMap, DownloadDataMapSchema, DownloadInfo, DownloadInfoSchema, DownloadStatusMapSchema, DownloadStatusMap, ManagerApiErrorSchema, DownloadInfoGetApiErrorSchema, RequestHeaders, DataSerializationApiErrorSchema, DownloadStatusSchema, DownloadOptions, DownloadOptionsSchema } from "./typesOfBackend"
-import type { DownloadStatus } from "./typesOfBackend"
-import { DEFAULT_REQUEST_HEADERS } from "./defaults"
+import {
+    DownloadDataMap,
+    DownloadDataMapSchema,
+    DownloadInfo,
+    DownloadInfoSchema,
+    DownloadStatusMapSchema,
+    DownloadStatusMap,
+    DownloadStatusSchema,
+    DownloadStatus,
+    ManagerApiErrorSchema,
+    DownloadInfoGetApiErrorSchema,
+    RequestHeaders,
+    DataSerializationApiErrorSchema,
+    DownloadOptions,
+    DownloadOptionsSchema,
+    Config,
+    ConfigSchema,
+} from "./typesOfBackend"
+
+/**
+ * Gets the current config directly from the backend via getConfigFile().
+ */
+async function getCurrentConfig(): Promise<Config> {
+    const { fetchConfigFile } = await import("./defaults");
+    return await fetchConfigFile();
+}
+
+export async function setConfigFile(config: Config): Promise<void> {
+    const parsed = await ConfigSchema.parseAsync(config);
+    await invoke("set_config_file", { config: parsed });
+}
+
 export async function addDownload(opts: DownloadOptions): Promise<string> {
     try {
         const parsed = await DownloadOptionsSchema.parseAsync(opts)
@@ -36,9 +65,15 @@ export async function getStatus(): Promise<DownloadStatusMap> {
 
 export async function getDownloadMetadata(url: string, requestHeaders?: RequestHeaders): Promise<DownloadInfo> {
     try {
+        // Get current config if no headers provided
+        let headers = requestHeaders;
+        if (!headers) {
+            const config = await getCurrentConfig();
+            headers = config.request_headers;
+        }
         const infoMaybe = await invoke("get_download_metadata", {
             url: url,
-            requestHeaders: requestHeaders ?? DEFAULT_REQUEST_HEADERS
+            requestHeaders: headers
         })
         const info = await DownloadInfoSchema.parseAsync(infoMaybe)
         return info

@@ -16,9 +16,9 @@ import {
     saveSession,
     deleteDownload,
     stopDownload,
-} from "./apiCommunicate.ts"; // Your invoke file
-import { getConfigFile } from "./defaults.ts";
-import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, RequestHeaders, DownloadOptions } from "./typesOfBackend";
+    setConfigFile,
+} from "./apiCommunicate.ts";
+import type { DownloadStatusMap, DownloadInfo, DownloadDataMap, RequestHeaders, DownloadOptions, Config } from "./typesOfBackend";
 
 // ============================================================================
 // 1. Centralized Query Keys
@@ -30,9 +30,34 @@ export const downloadKeys = {
     metadata: (url: string) => [...downloadKeys.all, "metadata", url] as const,
 };
 
+export const configQueryKey = ["config"] as const;
+
 // ============================================================================
 // 2. Query Hooks (Data Fetching & Polling)
 // ============================================================================
+
+/**
+ * Retrieves the backend config file using TanStack Query.
+ * This query will automatically refetch when set_config_file is called on the backend.
+ */
+export function useConfig() {
+    return useQuery<Config>({
+        queryKey: configQueryKey,
+        queryFn: () => import("./defaults").then(m => m.fetchConfigFile()),
+        staleTime: 1000 * 60 * 5, // 5 minutes
+    });
+}
+
+/**
+ * Fetches the current config as part of downloads data.
+ * This is separate from the main config query so it can be used independently.
+ */
+export function useDownloadConfig() {
+    return useQuery<Config>({
+        queryKey: configQueryKey,
+        queryFn: () => import("./defaults").then(m => m.fetchConfigFile()),
+    });
+}
 
 /**
  * Polls active download statuses every `pollIntervalMs` (default 300ms).
@@ -64,10 +89,16 @@ export function useDownloadMetadata(url: string | undefined, requestHeaders?: Re
         staleTime: 1000 * 60 * 5, // Cache metadata for 5 minutes
     });
 }
+
+/** Metadata mutation variables interface */
 export interface MetadataMutationVariables {
     url: string;
     requestHeaders?: RequestHeaders;
 }
+
+/**
+ * Fetches metadata via a mutation hook.
+ */
 export function useFetchMetadata() {
     return useMutation({
         mutationFn: ({ url, requestHeaders }: MetadataMutationVariables) => getDownloadMetadata(url, requestHeaders),
@@ -75,15 +106,14 @@ export function useFetchMetadata() {
 }
 
 /**
- * Fetches full persistent snapshot data (for session exports or debugging).
+ * Polls full persistent snapshot data (for session exports or debugging).
  */
 export function useDownloadData(pollIntervalMs = 300) {
     return useQuery<DownloadDataMap>({
         queryKey: downloadKeys.data(),
         queryFn: getData,
         refetchInterval: pollIntervalMs,
-        placeholderData: (prevData) => prevData
-
+        placeholderData: (prevData) => prevData,
     });
 }
 
@@ -93,6 +123,7 @@ export function useDownloadData(pollIntervalMs = 300) {
 
 /**
  * Adds a new download and immediately invalidates the status query cache.
+ * Also refetches the config to pick up any changes.
  */
 export function useAddDownload() {
     const queryClient = useQueryClient();
@@ -100,7 +131,8 @@ export function useAddDownload() {
     return useMutation({
         mutationFn: (opts: DownloadOptions) => addDownload(opts),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: downloadKeys.all })
+            queryClient.invalidateQueries({ queryKey: downloadKeys.all });
+            queryClient.invalidateQueries({ queryKey: configQueryKey });
         },
     });
 }
@@ -166,7 +198,7 @@ export function useGetItemStatus() {
 /** Gets the config file */
 export function useGetConfigFile() {
     return useMutation({
-        mutationFn: getConfigFile,
+        mutationFn: () => import("./defaults").then(m => m.fetchConfigFile()),
     });
 }
 
@@ -174,6 +206,22 @@ export function useGetConfigFile() {
 export function useSaveSession() {
     return useMutation({
         mutationFn: saveSession,
+    });
+}
+
+/**
+ * Updates the backend config file and broadcasts changes to the frontend.
+ * On success, refetches config via TanStack Query to keep UI in sync.
+ */
+export function useSetConfig() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (config: Config) => setConfigFile(config),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: configQueryKey });
+            queryClient.invalidateQueries({ queryKey: downloadKeys.all });
+        },
     });
 }
 
@@ -207,6 +255,7 @@ export function useStopDownload() {
         },
     });
 }
+
 // Base error guaranteed across ALL Tauri commands
 export interface BaseAppError {
     message: string;

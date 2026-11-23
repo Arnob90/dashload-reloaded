@@ -1,8 +1,10 @@
-import { DEFAULT_REQUEST_HEADERS } from "../../code/defaults";
+import { useAppConfig } from "../../code/useAppConfig";
 import { RequestHeaders } from "../../code/typesOfBackend";
 import { useEffect, useState } from "react";
-export function useRequestHeaders(defaultHeaders: RequestHeaders = DEFAULT_REQUEST_HEADERS) {
-    const [requestHeaders, setRequestHeaders] = useState<RequestHeaders>(defaultHeaders);
+export function useRequestHeaders(defaultHeaders?: RequestHeaders) {
+    const config = useAppConfig();
+    const headers = defaultHeaders ?? config.request_headers;
+    const [requestHeaders, setRequestHeaders] = useState<RequestHeaders>(headers);
     useEffect(() => {
         for (const key in requestHeaders) {
             if (requestHeaders[key as keyof RequestHeaders] === "") {
