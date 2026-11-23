@@ -43,8 +43,7 @@ async fn set_config_file(
     // Broadcast the new config to any watchers and update polling interval.
     let _ = state.config.send(config.clone());
     // Hot-swap the DownloadManager polling interval when config changes.
-    let poll_ms = config.polling_rate.as_millis() as u64;
-    let _ = state.download_manager.set_poll_every(poll_ms);
+    let _ = state.download_manager.set_poll_every(config.polling_rate_ms);
     Ok(())
 }
 
