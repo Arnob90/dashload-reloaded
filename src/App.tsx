@@ -11,6 +11,7 @@ import { DownloadTable } from "./components/downloadtable/downloadtable";
 import { ErrorBoundary, getErrorMessage } from "react-error-boundary"
 import { ExtensionRequestDownload } from "./components/adddownload/addDownloadOnExtensionRequest";
 import { useEffect } from "react";
+import { ConfigMenu } from "./components/adddownload/configMenu";
 const theme = createTheme({
     fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
     primaryColor: 'indigo',
@@ -34,6 +35,7 @@ const theme = createTheme({
 });
 function App() {
     const [addDownloadDialogOpened, { open: openAddDownloadDialog, close: closeAddDownloadDialog }] = useDisclosure(false)
+    const [configMenuOpened, { toggle: toggleConfigMenu, close: closeConfigMenu }] = useDisclosure(false)
     const requestMap = useExternalDownloadRequestMap();
     useEffect(() => {
         closeAddDownloadDialog();
@@ -50,8 +52,9 @@ function App() {
             <MantineProvider theme={theme} forceColorScheme="dark">
                 <Flex direction="column" h="100vh" w="100vw">
                     <Notifications />
-                    <DownloadHeader onClickAddDownload={openAddDownloadDialog} />
+                    <DownloadHeader onClickAddDownload={openAddDownloadDialog} toggleConfigMenu={toggleConfigMenu} />
                     <AddDownload opened={addDownloadDialogOpened} onClose={closeAddDownloadDialog} />
+                    <ConfigMenu opened={configMenuOpened} onClose={closeConfigMenu} />
                     <ExtensionRequestDownload requestMap={requestMap} />
                     <DownloadTable />
                 </Flex>

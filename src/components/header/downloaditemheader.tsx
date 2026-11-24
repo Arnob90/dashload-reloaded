@@ -1,15 +1,15 @@
-import { Button, Flex, Menu, TextInput } from "@mantine/core"
+import { Button, Flex, TextInput } from "@mantine/core"
 import styles from "./header.module.css"
 import { Plus, Search, Settings } from "lucide-react"
 import { useState } from "react";
-import { SettingsMenu } from "../settingsmenu/settingsmenu";
 
 export interface DownloadHeaderProps {
     onClickAddDownload?: () => void;
     onClickSearch?: (query: String) => void;
+    toggleConfigMenu?: () => void;
 }
 
-export function DownloadHeader({ onClickAddDownload, onClickSearch }: DownloadHeaderProps) {
+export function DownloadHeader({ onClickAddDownload, onClickSearch, toggleConfigMenu }: DownloadHeaderProps) {
     const [textInputContents, setTextInputContents] = useState("");
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -48,16 +48,9 @@ export function DownloadHeader({ onClickAddDownload, onClickSearch }: DownloadHe
                         },
                     }}
                 />
-                <Menu position="bottom-end" withinPortal>
-                    <Menu.Target>
-                        <Button variant="subtle" radius="xl" p="xs">
-                            <Settings size={18} />
-                        </Button>
-                    </Menu.Target>
-                    <Menu.Dropdown w={360} p="md">
-                        <SettingsMenu />
-                    </Menu.Dropdown>
-                </Menu>
+                <Button variant="subtle" radius="xl" p="xs" onClick={toggleConfigMenu} >
+                    <Settings size={18} />
+                </Button>
             </Flex>
             <div className={styles.separator}></div>
         </Flex>

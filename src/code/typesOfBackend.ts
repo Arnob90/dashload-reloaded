@@ -55,7 +55,7 @@ export const ConfigSchema = z.object({
     default_number_of_segments: z.number(),
     retry_scheme: RetrySchemeSchema,
     request_headers: RequestHeadersSchema,
-    polling_rate: z.string(),
+    polling_rate_ms: z.number(),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
