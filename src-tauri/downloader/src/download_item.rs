@@ -123,10 +123,10 @@ impl DownloadItem {
         tokio::task::spawn_blocking(move || verifier.verify_with_hash(&filepath))
             .await
             .map_err(|e| {
-                VerifyError::IOError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Verification task panicked {}", e),
-                ))
+                VerifyError::IOError(std::io::Error::other(format!(
+                    "Verification task panicked {}",
+                    e
+                )))
             })?
     }
 

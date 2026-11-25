@@ -1,7 +1,8 @@
 use crate::download_data::DownloadData;
 use crate::download_data_factory::DownloadDataFactory;
-use crate::download_item::DownloadItem;
+use crate::download_item::{DownloadItem, VerificationState};
 use crate::download_options::DownloadOptions;
+use crate::download_run_error::{DownloadRunError, FailureDetails};
 use crate::download_status::DownloadState;
 use crate::download_status::DownloadStatus;
 use crate::info_getters;
@@ -10,7 +11,7 @@ use crate::retry_scheme::RetryScheme;
 use crate::segmented_verifier::SegmentVerificationError;
 use crate::segmented_verifier::verify_segmented;
 use crate::serialization_error::DataSerializationError;
-use crate::verifier::VerifierMaybe;
+use crate::verifier::{VerifierMaybe, VerifyError};
 use dashmap::DashMap;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -361,6 +362,84 @@ impl DownloadManager {
         }
         self.download_items.remove(id);
         Ok(())
+    }
+
+    /// Verifies a completed download using the provided verifier.
+    ///
+    /// This triggers verification with proper state transitions:
+    /// `Completed` → `Verifying` → `Completed` / `Failed`
+    ///
+    /// # Arguments
+    /// * `id` - The download ID to verify
+    /// * `verifier` - The verifier to use (can be different from the original)
+    ///
+    /// # Errors
+    /// * `ManagerError::IdDoesNotExist` - If the download ID doesn't exist
+    /// * `ManagerError::OperationFailed` - If verification fails or the download isn't completed
+    pub async fn verify_download(
+        &self,
+        id: &str,
+        verifier: VerifierMaybe,
+    ) -> Result<(), ManagerError> {
+        let lock = self.op_lock(id);
+        let _op_guard = lock.lock().await;
+
+        let item = self
+            .download_items
+            .get(id)
+            .map(|entry| entry.value().clone())
+            .ok_or(ManagerError::IdDoesNotExist)?;
+
+        // Check that the download is in a completed state
+        let status = item.get_status();
+        if !matches!(status.state, DownloadState::Completed { .. }) {
+            return Err(ManagerError::OperationFailed(
+                "Download is not in a completed state; cannot verify".to_string(),
+            ));
+        }
+
+        // Signal that verification is starting
+        let _ = item.verify_result_sender.send(VerificationState::Verifying);
+
+        let filepath = item.filepath.clone();
+        let verified = tokio::task::spawn_blocking(move || verifier.verify_with_hash(&filepath))
+            .await
+            .map_err(|e| ManagerError::OperationFailed(format!("Verification task panicked: {}", e)))?;
+
+        match verified {
+            Ok(true) => {
+                let _ = item.verify_result_sender.send(VerificationState::Verified);
+                Ok(())
+            }
+            Ok(false) => unreachable!("verify_with_hash returns Err on mismatch"),
+            Err(VerifyError::HashMismatch { expected, actual }) => {
+                let expected_clone = expected.clone();
+                let actual_clone = actual.clone();
+                let err = DownloadRunError::VerifyError { expected, actual };
+                let details = FailureDetails::new(err.clone());
+                let _ = item
+                    .verify_result_sender
+                    .send(VerificationState::VerifyFailed(details));
+                Err(ManagerError::OperationFailed(format!(
+                    "Verification failed: expected {}, got {}",
+                    expected_clone, actual_clone
+                )))
+            }
+            Err(VerifyError::IOError(io)) => {
+                let err = DownloadRunError::DiskError {
+                    message: format!("IO error during verification: {}", io),
+                    path: Some(item.filepath.display().to_string()),
+                };
+                let details = FailureDetails::new(err.clone());
+                let _ = item
+                    .verify_result_sender
+                    .send(VerificationState::VerifyFailed(details));
+                Err(ManagerError::OperationFailed(format!(
+                    "IO error during verification: {}",
+                    io
+                )))
+            }
+        }
     }
 
     /// Gets instantaneous status for a single download item (no async needed).

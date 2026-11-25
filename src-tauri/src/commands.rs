@@ -6,6 +6,7 @@ use downloader::download_status::DownloadStatus;
 use downloader::get_download_info::{get_download_info, DownloadInfo, DownloadInfoGetError};
 use downloader::request_headers::RequestHeaders;
 use downloader::serialization_error::DataSerializationError;
+use downloader::verifier::VerifierMaybe;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::ipc::Invoke;
@@ -151,6 +152,16 @@ async fn stop_download(state: State<'_, AppState>, id: &str) -> Result<(), ApiEr
     Ok(())
 }
 
+#[tauri::command]
+async fn verify_download(
+    state: State<'_, AppState>,
+    id: &str,
+    verifier: VerifierMaybe,
+) -> Result<(), ApiError<ManagerError>> {
+    state.download_manager.verify_download(id, verifier).await?;
+    Ok(())
+}
+
 pub fn get_handlers() -> impl Fn(Invoke<tauri::Wry>) -> bool {
     tauri::generate_handler![
         add_download,
@@ -166,6 +177,7 @@ pub fn get_handlers() -> impl Fn(Invoke<tauri::Wry>) -> bool {
         delete_download,
         get_config_file,
         set_config_file,
-        stop_download
+        stop_download,
+        verify_download
     ]
 }
