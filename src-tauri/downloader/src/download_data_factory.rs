@@ -9,7 +9,6 @@ use crate::verifier::VerifierMaybe;
 use reqwest::header::HeaderMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use tokio::fs;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -84,7 +83,7 @@ impl DownloadDataFactory {
             },
             verifier,
             retry_scheme,
-            elapsed: Duration::ZERO,
+            elapsed_ms: 0,
         }
     }
 
@@ -112,7 +111,7 @@ impl DownloadDataFactory {
             },
             verifier,
             retry_scheme,
-            elapsed: Duration::ZERO,
+            elapsed_ms: 0,
         }
     }
 
@@ -161,7 +160,10 @@ mod deserialize_tests {
         assert_eq!(got.state, data.state);
         assert_eq!(got.segments.len(), data.segments.len());
         assert_eq!(got.verifier.is_some(), data.verifier.is_some());
-        assert_eq!(got.retry_scheme.max_attempts, data.retry_scheme.max_attempts);
+        assert_eq!(
+            got.retry_scheme.max_attempts,
+            data.retry_scheme.max_attempts
+        );
     }
 
     /// Invalid JSON -> DeserializationError.

@@ -7,6 +7,7 @@ use atomic_time::AtomicDuration;
 use futures::future::try_join_all;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::fs;
 use tokio::sync::watch;
 /// Options for download item creation.
@@ -110,9 +111,23 @@ impl DownloadItem {
             verify_result_receiver: receiver,
             verify_result_sender: sender,
             retry_scheme: download_data.retry_scheme,
-            elapsed: AtomicDuration::new(download_data.elapsed),
+            elapsed: AtomicDuration::new(Duration::from_millis(download_data.elapsed_ms)),
         });
         Ok(item)
+    }
+    pub async fn verify(
+        &self,
+        filepath: PathBuf,
+        verifier: VerifierMaybe,
+    ) -> Result<bool, VerifyError> {
+        tokio::task::spawn_blocking(move || verifier.verify_with_hash(&filepath))
+            .await
+            .map_err(|e| {
+                VerifyError::IOError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Verification task panicked {}", e),
+                ))
+            })?
     }
 
     /// Starts all segments concurrently, manages pause/stop lifecycles, and triggers post-download verification.
@@ -308,7 +323,10 @@ impl DownloadItem {
             state: self.get_status().state,
             verifier: self.verifier.clone(),
             retry_scheme: self.retry_scheme.clone(),
-            elapsed: self.elapsed.load(std::sync::atomic::Ordering::SeqCst),
+            elapsed_ms: self
+                .elapsed
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .as_millis() as u64,
         }
     }
 

@@ -1,4 +1,3 @@
-use crate::serialize_io_error::serialize_io_error;
 use digest::DynDigest;
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};

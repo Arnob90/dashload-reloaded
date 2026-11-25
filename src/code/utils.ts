@@ -1,4 +1,3 @@
-import { RustDuration } from "./typesOfBackend";
 export function bytesToMIB(bytes: number): number {
     return Number((bytes / 1024 / 1024).toFixed(2))
 }
@@ -50,8 +49,4 @@ export function calculateEta(
 
 export function getFilenameFromPath(filepath: string): string {
     return filepath.trim().replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "_";
-}
-
-export function durationToMs(duration: RustDuration): number {
-    return duration.secs * 1000 + Math.floor(duration.nanos / 1_000_000);
 }

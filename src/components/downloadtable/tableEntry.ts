@@ -6,7 +6,6 @@ import { DownloadState, FailureDetails } from "../../code/typesOfBackend.ts";
 import { useEffect, useMemo } from "react";
 import { notifications } from "@mantine/notifications";
 import { getFilenameFromPath, calculateEta } from "../../code/utils.ts";
-import { durationToMs } from "../../code/utils.ts";
 import type { DownloadDataMap, DownloadStatusMap } from "../../code/typesOfBackend.ts";
 
 export interface TableEntry {
@@ -84,7 +83,7 @@ function buildEntries(
                 referrer: segmentHeaders?.referrer ?? null,
                 cookies: segmentHeaders?.cookies ?? null,
             },
-            elapsedTimeMs: durationToMs(data.elapsed),
+            elapsedTimeMs: data.elapsed_ms,
         });
     }
     res.sort((a, b) => a.id.localeCompare(b.id));

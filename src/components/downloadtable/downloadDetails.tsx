@@ -28,6 +28,20 @@ interface DownloadDetailsPaneProps {
     entry: TableEntry;
     onClose: () => void;
 }
+function formatDuration(ms: number): string {
+    if (!Number.isFinite(ms) || ms < 0) return "0s";
+
+    const totalSeconds = Math.floor(ms / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+}
 
 // ============================================================================
 // Error & Diagnostics helpers
@@ -197,6 +211,7 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
             console.error(e);
         }
     };
+    const etaText = entry.eta ? formatDuration(entry.eta * 1000) : null
 
     return (
         <Paper
@@ -249,38 +264,55 @@ export function DownloadDetailsPane({ entry, onClose }: DownloadDetailsPaneProps
                 <Tabs.Panel value="overview">
                     {/* File Title and Status Badge */}
                     <Group justify="space-between" mb="xs">
-                        <Text size="sm" fw={600} truncate maw="80%">
+                        <Text size="sm" fw={600} truncate maw="75%">
                             {entry.filename}
                         </Text>
-                        <Badge color={colorMap[entry.status.kind] ?? "gray"} variant="light" size="sm">
-                            {entry.status.kind}
-                        </Badge>
+                        <Group gap="xs" wrap="nowrap">
+                            <Text size="xs" c="dimmed" style={{ fontVariantNumeric: "tabular-nums" }}>
+                                {formatDuration(entry.elapsedTimeMs)} elapsed
+                            </Text>
+                            <Badge color={colorMap[entry.status.kind] ?? "gray"} variant="light" size="sm">
+                                {entry.status.kind}
+                            </Badge>
+                        </Group>
                     </Group>
 
                     {/* Progress Bar & Stats */}
                     <Box mb="md">
                         <Progress
                             value={pct}
-                            size="md" // 8px thick instead of thin wire
+                            size="md"
                             radius="xl"
                             color={pct === 100 ? "teal" : "blue"}
                             mb={6}
                             styles={{
                                 section: {
-                                    transition: "width 300ms ease-in-out", // Smooth transition for progress bar
-                                }
+                                    transition: "width 300ms ease-in-out",
+                                },
                             }}
                         />
-                        <Group justify="space-between">
-                            <Text size="xs" c="dimmed">
+                        <Group justify="space-between" gap="xs">
+                            <Text size="xs" c="dimmed" style={{ fontVariantNumeric: "tabular-nums" }}>
                                 {pct}% • {bytesToMIB(entry.downloaded).toFixed(1)} MiB of{" "}
                                 {entry.total != null ? `${bytesToMIB(entry.total).toFixed(1)} MiB` : "Unknown"}
                             </Text>
-                            <Text size="xs" fw={500} c={entry.speed ? "blue" : "dimmed"}>
-                                {entry.speed && entry.speed > 0
-                                    ? `${bytesToMIB(entry.speed).toFixed(2)} MiB/s`
-                                    : "-"}
-                            </Text>
+                            <Group gap="md" wrap="nowrap">
+                                {etaText && (
+                                    <Text size="xs" c="dimmed" style={{ fontVariantNumeric: "tabular-nums" }}>
+                                        ETA {etaText}
+                                    </Text>
+                                )}
+                                <Text
+                                    size="xs"
+                                    fw={500}
+                                    c={entry.speed ? "blue" : "dimmed"}
+                                    style={{ fontVariantNumeric: "tabular-nums" }}
+                                >
+                                    {entry.speed && entry.speed > 0
+                                        ? `${bytesToMIB(entry.speed).toFixed(2)} MiB/s`
+                                        : null}
+                                </Text>
+                            </Group>
                         </Group>
                     </Box>
 

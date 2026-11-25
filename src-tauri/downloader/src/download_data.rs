@@ -1,11 +1,9 @@
 use std::path::PathBuf;
 
 use crate::{
-    download_status::DownloadState, in_place_segment::InPlaceSegmentData,
-    verifier::VerifierMaybe,
+    download_status::DownloadState, in_place_segment::InPlaceSegmentData, verifier::VerifierMaybe,
 };
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 /// Complete persistent state for a single download, used for session serialization and reconstruction.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -25,15 +23,13 @@ pub struct DownloadData {
     /// Retry scheme for download
     pub retry_scheme: crate::retry_scheme::RetryScheme,
     /// Time elapsed since the download started
-    pub elapsed: Duration,
+    pub elapsed_ms: u64,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        download_data_factory::DownloadDataFactory, retry_scheme::RetryScheme,
-    };
+    use crate::{download_data_factory::DownloadDataFactory, retry_scheme::RetryScheme};
     use reqwest::header::HeaderMap;
 
     /// Full `DownloadData` serde round-trip (the persistence unit).
