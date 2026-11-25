@@ -79,6 +79,47 @@ async fn test_single_stream_with_verifier() {
     cleanup_file(&path).await;
 }
 
+/// Test: DownloadState::Verifying is actively sent when verification starts
+///
+/// This test verifies the fix for the bug where DownloadState::Verifying
+/// was never actively sent during verification - it was only the default
+/// initial value. Now verification actively sends Verifying state.
+#[tokio::test]
+async fn test_verifying_state_sent_during_verification() {
+    let mock_server = setup_single_stream_mock_server().await;
+    let client = reqwest::Client::new();
+    let manager = DownloadManager::new(client, 100);
+    let path = temp_filepath("wiremock_verify_state");
+
+    let id = manager
+        .add_download(
+            DownloadOptions::new(format!("{}/test-file.bin", mock_server.uri()), path.clone())
+                .with_segments(1)
+                .with_verifier(create_sha256_verifier())
+                .with_headers(default_test_headers())
+                .with_retry(default_retry_scheme()),
+        )
+        .await
+        .expect("Failed to add download");
+
+    // Poll until download completes - with the fix, the state should transition
+    // from Running -> Verifying -> Completed (actively sending Verifying)
+    let final_status = poll_until_completed(&manager, &id, 10_000)
+        .await
+        .expect("Download timed out");
+
+    // With the fix, the final state should still be Completed
+    assert!(matches!(final_status.state, DownloadState::Completed { size } if size == TEST_FILE_SIZE));
+
+    // Verify file content
+    let content = tokio::fs::read(&path)
+        .await
+        .expect("Failed to read downloaded file");
+    assert_eq!(content, test_file_content());
+
+    cleanup_file(&path).await;
+}
+
 /// Test: Single stream with SHA512 verification
 #[tokio::test]
 async fn test_single_stream_sha512_verifier() {

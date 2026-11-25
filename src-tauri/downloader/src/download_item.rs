@@ -150,6 +150,8 @@ impl DownloadItem {
         // Run all segment workers concurrently
         let verify_clone = self.verifier.clone();
         let filepath_clone = self.filepath.clone();
+        // Signal that verification is starting
+        let _ = self.verify_result_sender.send(VerificationState::Verifying);
         let verified =
             tokio::task::spawn_blocking(move || verify_clone.verify_with_hash(&filepath_clone))
                 .await
